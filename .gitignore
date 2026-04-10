@@ -1,0 +1,13 @@
+node_modules
+.pnpm-store
+dist
+build
+.turbo
+.env
+.env.*
+!.env.example
+coverage
+*.log
+apps/mobile/android
+apps/mobile/ios
+apps/desktop/src-tauri/target

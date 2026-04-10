@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "strict": false,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "exactOptionalPropertyTypes": false,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@kobina/core": ["../../packages/core/src"],
+      "@kobina/sync": ["../../packages/sync/src"],
+      "@kobina/ui": ["../../packages/ui/src"]
+    }
+  },
+  "include": ["src"]
+}

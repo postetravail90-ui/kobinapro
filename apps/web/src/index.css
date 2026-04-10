@@ -1,0 +1,191 @@
+/* Font loaded via <link> in index.html for non-blocking render */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Apple-inspired palette — #16A34A green + neutral grays */
+    --background: 0 0% 96%;
+    --foreground: 220 30% 8%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 30% 8%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 30% 8%;
+
+    --primary: 142 64% 36%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 160 84% 18%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 10% 94%;
+    --muted-foreground: 220 10% 46%;
+
+    --accent: 142 40% 95%;
+    --accent-foreground: 142 64% 28%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 10% 91%;
+    --input: 220 10% 91%;
+    --ring: 142 64% 36%;
+
+    --radius: 0.875rem;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 220 30% 8%;
+    --sidebar-primary: 142 64% 36%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 142 40% 95%;
+    --sidebar-accent-foreground: 142 64% 28%;
+    --sidebar-border: 220 10% 91%;
+    --sidebar-ring: 142 64% 36%;
+
+    --warning: 40 95% 55%;
+    --warning-foreground: 30 80% 20%;
+    --success: 142 64% 36%;
+    --success-foreground: 0 0% 100%;
+    --info: 210 80% 55%;
+    --info-foreground: 0 0% 100%;
+
+    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px -1px rgb(0 0 0 / 0.06);
+    --shadow-card-hover: 0 4px 12px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+    --shadow-fab: 0 4px 14px -2px hsl(142 64% 36% / 0.3);
+  }
+
+  .dark {
+    --background: 220 16% 7%;
+    --foreground: 0 0% 96%;
+    --card: 220 16% 10%;
+    --card-foreground: 0 0% 96%;
+    --popover: 220 16% 10%;
+    --popover-foreground: 0 0% 96%;
+    --primary: 142 64% 42%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 160 84% 22%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 220 12% 16%;
+    --muted-foreground: 220 10% 55%;
+    --accent: 142 30% 15%;
+    --accent-foreground: 142 64% 55%;
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 12% 18%;
+    --input: 220 12% 18%;
+    --ring: 142 64% 42%;
+    --sidebar-background: 220 16% 8%;
+    --sidebar-foreground: 0 0% 96%;
+    --sidebar-primary: 142 64% 42%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 142 30% 15%;
+    --sidebar-accent-foreground: 142 64% 55%;
+    --sidebar-border: 220 12% 18%;
+    --sidebar-ring: 142 64% 42%;
+
+    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.2), 0 1px 2px -1px rgb(0 0 0 / 0.15);
+    --shadow-card-hover: 0 4px 12px -2px rgb(0 0 0 / 0.3);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.011em;
+  }
+  /* Apple-style tap feedback */
+  button, a, [role="button"] {
+    transition: transform 0.12s cubic-bezier(0.25, 0.46, 0.45, 0.94), opacity 0.12s ease;
+  }
+  button:active:not(:disabled), a:active, [role="button"]:active {
+    transform: scale(0.97);
+    opacity: 0.8;
+  }
+}
+
+@layer utilities {
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+  .card-float {
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 0.25s ease, transform 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  }
+  .card-float:hover {
+    box-shadow: var(--shadow-card-hover);
+    transform: translateY(-1px);
+  }
+  .card-float:active {
+    transform: scale(0.985);
+    box-shadow: var(--shadow-card);
+  }
+  .fab-shadow {
+    box-shadow: var(--shadow-fab);
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .offline-badge {
+    @apply bg-warning/15 text-warning-foreground border border-warning/30;
+  }
+  .safe-area-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  /* Glass effect — reduced blur for perf on low-end devices */
+  .glass {
+    backdrop-filter: blur(12px) saturate(150%);
+    -webkit-backdrop-filter: blur(12px) saturate(150%);
+  }
+  /* Layout containment for scrollable areas */
+  .contain-layout {
+    contain: layout style;
+  }
+  .contain-strict {
+    contain: layout style paint;
+  }
+}
+
+/* Reduce motion for users who prefer it + slow devices */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Shimmer skeleton animation */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--muted)) 25%,
+    hsl(var(--muted-foreground) / 0.06) 50%,
+    hsl(var(--muted)) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s ease-in-out infinite;
+}

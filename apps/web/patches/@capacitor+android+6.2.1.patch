@@ -1,0 +1,36 @@
+diff --git a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java
+index 594146a..1d4f0cd 100644
+--- a/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java
++++ b/node_modules/@capacitor/android/capacitor/src/main/java/com/getcapacitor/Bridge.java
+@@ -310,19 +310,21 @@ public class Bridge {
+     public boolean isMinimumWebViewInstalled() {
+         PackageManager pm = getContext().getPackageManager();
+ 
+-        // Check getCurrentWebViewPackage() directly if above Android 8
++        // Check getCurrentWebViewPackage() directly if above Android 8.
++        // Certains constructeurs (ex. MediaTek / ROM personnalisées) renvoient null → éviter le NPE et retomber sur la détection legacy.
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+             PackageInfo info = WebView.getCurrentWebViewPackage();
+-            Pattern pattern = Pattern.compile("(\\d+)");
+-            Matcher matcher = pattern.matcher(info.versionName);
+-            if (matcher.find()) {
+-                String majorVersionStr = matcher.group(0);
+-                int majorVersion = Integer.parseInt(majorVersionStr);
+-                if (info.packageName.equals("com.huawei.webview")) {
+-                    return majorVersion >= config.getMinHuaweiWebViewVersion();
++            if (info != null && info.versionName != null) {
++                Pattern pattern = Pattern.compile("(\\d+)");
++                Matcher matcher = pattern.matcher(info.versionName);
++                if (matcher.find()) {
++                    String majorVersionStr = matcher.group(0);
++                    int majorVersion = Integer.parseInt(majorVersionStr);
++                    if ("com.huawei.webview".equals(info.packageName)) {
++                        return majorVersion >= config.getMinHuaweiWebViewVersion();
++                    }
++                    return majorVersion >= config.getMinWebViewVersion();
+                 }
+-                return majorVersion >= config.getMinWebViewVersion();
+-            } else {
+                 return false;
+             }
+         }
