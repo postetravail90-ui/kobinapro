@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 import UpgradePrompt from '@/components/UpgradePrompt';
 import BackButton from '@/components/BackButton';
 
@@ -35,6 +36,13 @@ export default function CommercesPage() {
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user) return;
+    const cacheKey = `commerces_list_${user.id}`;
+    const stale = cacheGetStale<Commerce[]>(cacheKey);
+    if (stale?.length && !opts?.silent) {
+      setCommerces(stale);
+      setLoading(false);
+    }
+
     const { data, error } = await supabase
       .from('commerces')
       .select('*')
@@ -43,13 +51,14 @@ export default function CommercesPage() {
 
     if (error) {
       console.error('[CommercesPage] load', error);
-      if (!opts?.silent) {
-        toast.error('Impossible de charger vos commerces. Vérifiez la connexion.');
-      }
+      if (stale?.length) setCommerces(stale);
+      else setCommerces([]);
       setLoading(false);
       return;
     }
-    setCommerces(data ?? []);
+    const rows = data ?? [];
+    setCommerces(rows);
+    cacheSet(cacheKey, rows, 86_400);
     setLoading(false);
   }, [user]);
 

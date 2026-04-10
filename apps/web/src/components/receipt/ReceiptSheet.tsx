@@ -7,6 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/hooks/useSubscription';
 import { toast } from 'sonner';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 interface Props {
   open: boolean;
@@ -19,26 +20,66 @@ export default function ReceiptSheet({ open, onClose, data }: Props) {
   const sub = useSubscription();
   const [branding, setBranding] = useState<any>(null);
 
-  // Load branding when sheet opens
+  // Branding : cache local d’abord, puis mise à jour silencieuse en arrière-plan
   useEffect(() => {
     if (!open || !user) return;
+    const cacheKey = `receipt_branding_${user.id}`;
+    const stale = cacheGetStale<Record<string, unknown>>(cacheKey);
+    if (stale && Object.keys(stale).length > 0) {
+      setBranding(stale);
+    }
+
+    let cancelled = false;
     const loadBranding = async () => {
-      const { data: comms } = await supabase.from('commerces').select('id').eq('proprietaire_id', user.id).limit(1);
-      const commerceId = comms?.[0]?.id;
-      if (!commerceId) {
-        // Try as gerant
-        const { data: gerantData } = await supabase.from('gerants').select('commerce_id').eq('user_id', user.id).eq('actif', true).limit(1);
-        const gCommId = gerantData?.[0]?.commerce_id;
-        if (gCommId) {
-          const { data: b } = await supabase.from('commerce_branding' as any).select('*').eq('commerce_id', gCommId).maybeSingle() as any;
-          setBranding(b);
+      try {
+        const { data: comms, error: e0 } = await supabase
+          .from('commerces')
+          .select('id')
+          .eq('proprietaire_id', user.id)
+          .limit(1);
+        if (e0) throw e0;
+        const commerceId = comms?.[0]?.id;
+        if (!commerceId) {
+          const { data: gerantData, error: e1 } = await supabase
+            .from('gerants')
+            .select('commerce_id')
+            .eq('user_id', user.id)
+            .eq('actif', true)
+            .limit(1);
+          if (e1) throw e1;
+          const gCommId = gerantData?.[0]?.commerce_id;
+          if (gCommId) {
+            const { data: b, error: e2 } = await supabase
+              .from('commerce_branding' as any)
+              .select('*')
+              .eq('commerce_id', gCommId)
+              .maybeSingle() as any;
+            if (e2) throw e2;
+            if (!cancelled && b) {
+              setBranding(b);
+              cacheSet(cacheKey, b as Record<string, unknown>, 86_400);
+            }
+          }
+          return;
         }
-        return;
+        const { data: b, error: e3 } = await supabase
+          .from('commerce_branding' as any)
+          .select('*')
+          .eq('commerce_id', commerceId)
+          .maybeSingle() as any;
+        if (e3) throw e3;
+        if (!cancelled && b) {
+          setBranding(b);
+          cacheSet(cacheKey, b as Record<string, unknown>, 86_400);
+        }
+      } catch {
+        /* conserver le branding en cache / par défaut */
       }
-      const { data: b } = await supabase.from('commerce_branding' as any).select('*').eq('commerce_id', commerceId).maybeSingle() as any;
-      setBranding(b);
     };
-    loadBranding();
+    void loadBranding();
+    return () => {
+      cancelled = true;
+    };
   }, [open, user]);
 
   if (!data) return null;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCommerceIds } from '@/hooks/useCommerceIds';
@@ -11,6 +11,7 @@ import ReceiptSheet from '@/components/receipt/ReceiptSheet';
 import { printReceipt, type ReceiptData } from '@/lib/receipt-utils';
 import { toast } from 'sonner';
 import BackButton from '@/components/BackButton';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 interface Facture {
   id: string;
@@ -24,54 +25,99 @@ interface Facture {
 
 export default function FacturesPage() {
   const { user } = useAuth();
-  const { commerceIds, commerces } = useCommerceIds();
+  const { commerceIds, commerces, loading: commerceLoading } = useCommerceIds();
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(true);
+  const [skeletonCap, setSkeletonCap] = useState(false);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [showReceipt, setShowReceipt] = useState(false);
 
   useEffect(() => {
-    if (!user) return;
-    const load = async () => {
-      const { data: comms } = await supabase.from('commerces').select('id').eq('proprietaire_id', user.id);
-      const ids = comms?.map(c => c.id) || [];
+    const t = setTimeout(() => setSkeletonCap(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
 
-      const { data: gerantData } = await supabase.from('gerants').select('commerce_id').eq('user_id', user.id).eq('actif', true);
-      if (gerantData) gerantData.forEach(g => { if (!ids.includes(g.commerce_id)) ids.push(g.commerce_id); });
+  const facturesCacheKey = user ? `factures_list_${user.id}` : '';
 
-      if (ids.length > 0) {
-        const { data: sessions } = await supabase.from('sessions').select('id, gerant_id').in('commerce_id', ids);
-        const sIds = sessions?.map(s => s.id) || [];
-        if (sIds.length > 0) {
-          const { data } = await supabase.from('factures').select('*').in('session_id', sIds).order('created_at', { ascending: false });
-          
-          // Fetch gerant names for each session
-          const gerantIds = [...new Set(sessions?.map(s => s.gerant_id).filter(Boolean) || [])];
-          let gerantProfileMap: Record<string, string> = {};
-          if (gerantIds.length > 0) {
-            const { data: gerants } = await supabase.from('gerants').select('id, user_id').in('id', gerantIds);
-            const userIds = gerants?.map(g => g.user_id) || [];
-            if (userIds.length > 0) {
-              const { data: profiles } = await supabase.from('profiles').select('id, nom').in('id', userIds);
-              const profileMap = new Map(profiles?.map(p => [p.id, p.nom]) || []);
-              gerants?.forEach(g => {
-                gerantProfileMap[g.id] = profileMap.get(g.user_id) || 'Vendeur';
-              });
-            }
+  const fetchFactures = useCallback(async () => {
+    if (!user || !facturesCacheKey || commerceLoading) return;
+    const ids = [...commerceIds];
+    try {
+      if (ids.length === 0) {
+        setFactures([]);
+        cacheSet(facturesCacheKey, [], 86_400);
+        return;
+      }
+
+      const { data: sessions, error: eSess } = await supabase
+        .from('sessions')
+        .select('id, gerant_id')
+        .in('commerce_id', ids);
+      if (eSess) throw eSess;
+
+      const sIds = sessions?.map((s) => s.id) || [];
+      if (sIds.length === 0) {
+        setFactures([]);
+        cacheSet(facturesCacheKey, [], 86_400);
+        return;
+      }
+
+      const { data, error: eFac } = await supabase
+        .from('factures')
+        .select('*')
+        .in('session_id', sIds)
+        .order('created_at', { ascending: false });
+      if (eFac) throw eFac;
+
+      const gerantIds = [...new Set(sessions?.map((s) => s.gerant_id).filter(Boolean) || [])] as string[];
+      const gerantProfileMap: Record<string, string> = {};
+      if (gerantIds.length > 0) {
+        const { data: gerants, error: eG } = await supabase.from('gerants').select('id, user_id').in('id', gerantIds);
+        if (!eG && gerants) {
+          const userIds = gerants.map((g) => g.user_id);
+          if (userIds.length > 0) {
+            const { data: profiles } = await supabase.from('profiles').select('id, nom').in('id', userIds);
+            const profileMap = new Map(profiles?.map((p) => [p.id, p.nom]) || []);
+            gerants.forEach((g) => {
+              gerantProfileMap[g.id] = profileMap.get(g.user_id) || 'Vendeur';
+            });
           }
-          
-          const sessionGerantMap = new Map(sessions?.map(s => [s.id, s.gerant_id]) || []);
-          
-          setFactures((data || []).map(f => ({
-            ...f as Facture,
-            vendeur_nom: gerantProfileMap[sessionGerantMap.get(f.session_id) || ''] || undefined,
-          })));
         }
       }
+
+      const sessionGerantMap = new Map(sessions?.map((s) => [s.id, s.gerant_id]) || []);
+      const mapped = (data || []).map((f) => ({
+        ...(f as Facture),
+        vendeur_nom: gerantProfileMap[sessionGerantMap.get(f.session_id) || ''] || undefined
+      }));
+      setFactures(mapped);
+      cacheSet(facturesCacheKey, mapped, 86_400);
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[FacturesPage]', err);
+      const stale = cacheGetStale<Facture[]>(facturesCacheKey);
+      if (stale) setFactures(stale);
+    } finally {
       setLoading(false);
-    };
-    load();
-  }, [user]);
+    }
+  }, [user, facturesCacheKey, commerceIds, commerceLoading]);
+
+  useEffect(() => {
+    if (!user) {
+      setFactures([]);
+      setLoading(false);
+      return;
+    }
+    const stale = cacheGetStale<Facture[]>(facturesCacheKey);
+    if (stale?.length) {
+      setFactures(stale);
+    }
+    if (commerceLoading) {
+      if (stale?.length) setLoading(false);
+      return;
+    }
+    if (!stale?.length) setLoading(true);
+    void fetchFactures();
+  }, [user, facturesCacheKey, commerceLoading, fetchFactures]);
 
   const loadReceiptData = async (f: Facture) => {
     const { data: session } = await supabase
@@ -135,7 +181,20 @@ export default function FacturesPage() {
       setReceiptData(data);
       setShowReceipt(true);
     } catch {
-      toast.error('Impossible de charger le reçu');
+      toast.message('Reçu partiel', { description: 'Certaines lignes peuvent manquer hors connexion.' });
+      const minimal: ReceiptData = {
+        id: f.id,
+        commerceName: commerces[0]?.nom || 'Commerce',
+        date: f.created_at,
+        vendeur: f.vendeur_nom || user?.email || 'Vendeur',
+        type: f.mode_paiement,
+        items: [],
+        sousTotal: Number(f.total_final),
+        totalFinal: Number(f.total_final),
+        reste: f.statut === 'credit' ? Number(f.total_final) : 0
+      };
+      setReceiptData(minimal);
+      setShowReceipt(true);
     }
   };
 
@@ -144,11 +203,11 @@ export default function FacturesPage() {
       const data = await loadReceiptData(f);
       printReceipt(data);
     } catch {
-      toast.error('Impossible d\'imprimer');
+      toast.message('Impression indisponible', { description: 'Les détails du ticket nécessitent souvent une connexion.' });
     }
   };
 
-  if (loading) return <div className="p-4"><SkeletonList /></div>;
+  if (loading && !skeletonCap) return <div className="p-4"><SkeletonList /></div>;
 
   const payees = factures.filter(f => f.statut === 'payee');
   const credits = factures.filter(f => f.statut === 'credit');

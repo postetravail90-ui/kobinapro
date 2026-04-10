@@ -111,8 +111,12 @@ export default function ProduitsPage() {
   };
 
   const handleSave = async () => {
+    if (commerceLoading) {
+      toast.info('Chargement de votre espace…');
+      return;
+    }
     if (commerceIds.length === 0) {
-      toast.error('Aucun commerce disponible. Rechargez la page ou vérifiez votre compte gérant / propriétaire.');
+      toast.error('Connexion requise pour synchroniser votre commerce, ou patientez quelques secondes.');
       return;
     }
     const nom = form.nom.trim();

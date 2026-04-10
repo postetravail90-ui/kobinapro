@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import GerantDetailSheet from '@/components/gerants/GerantDetailSheet';
 import UpgradePrompt from '@/components/UpgradePrompt';
 import BackButton from '@/components/BackButton';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 interface Gerant {
   id: string;
@@ -38,39 +39,98 @@ export default function GerantsPage() {
   const [form, setForm] = useState({ nom: '', email: '', numero: '', password: '', commerce_id: '' });
   const [selectedGerant, setSelectedGerant] = useState<Gerant | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [skeletonCap, setSkeletonCap] = useState(false);
   const addLock = useRef(false);
 
   const isOwner = role === 'proprietaire' || role === 'super_admin';
 
-  const load = async () => {
-    if (!user) return;
-    const { data: comms } = await supabase.from('commerces').select('id, nom').eq('proprietaire_id', user.id);
-    setCommerces(comms || []);
-    const ids = comms?.map(c => c.id) || [];
+  /** Masque l’enregistrement technique propriétaire↔commerce (requis pour la caisse), sans changer le quota côté useSubscription. */
+  const visibleGerants = useMemo(() => {
+    if (!isOwner || !user) return gerants;
+    return gerants.filter((g) => g.user_id !== user.id);
+  }, [gerants, isOwner, user]);
 
-    if (!isOwner) {
-      const { data: gerantData } = await supabase.from('gerants').select('commerce_id').eq('user_id', user.id).eq('actif', true);
-      gerantData?.forEach(g => { if (!ids.includes(g.commerce_id)) ids.push(g.commerce_id); });
-    }
+  useEffect(() => {
+    const t = setTimeout(() => setSkeletonCap(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
 
-    if (ids.length > 0) {
-      const { data } = await supabase.from('gerants').select('*').in('commerce_id', ids);
-      const userIds = data?.map(g => g.user_id) || [];
-      let profileMap: Record<string, { nom: string }> = {};
-      if (userIds.length > 0) {
-        const { data: profiles } = await supabase.from('profiles').select('id, nom').in('id', userIds);
-        profiles?.forEach(p => { profileMap[p.id] = { nom: p.nom }; });
+  const cacheKey = user ? `gerants_page_${user.id}` : '';
+
+  const load = useCallback(async () => {
+    if (!user || !cacheKey) return;
+    try {
+      const { data: comms, error: e0 } = await supabase.from('commerces').select('id, nom').eq('proprietaire_id', user.id);
+      if (e0) throw e0;
+      const commercesList = comms || [];
+      setCommerces(commercesList);
+      const ids = commercesList.map((c) => c.id);
+
+      if (!isOwner) {
+        const { data: gerantData, error: e1 } = await supabase
+          .from('gerants')
+          .select('commerce_id')
+          .eq('user_id', user.id)
+          .eq('actif', true);
+        if (e1) throw e1;
+        gerantData?.forEach((g) => {
+          if (!ids.includes(g.commerce_id)) ids.push(g.commerce_id);
+        });
       }
-      setGerants((data || []).map(g => ({
-        ...g,
-        commerce_nom: comms?.find(c => c.id === g.commerce_id)?.nom || 'Commerce',
-        gerant_nom: profileMap[g.user_id]?.nom,
-      })));
-    }
-    setLoading(false);
-  };
 
-  useEffect(() => { load(); }, [user]);
+      if (ids.length > 0) {
+        const { data, error: e2 } = await supabase.from('gerants').select('*').in('commerce_id', ids);
+        if (e2) throw e2;
+        const userIds = data?.map((g) => g.user_id) || [];
+        const profileMap: Record<string, { nom: string }> = {};
+        if (userIds.length > 0) {
+          const { data: profiles, error: e3 } = await supabase.from('profiles').select('id, nom').in('id', userIds);
+          if (e3) throw e3;
+          profiles?.forEach((p) => {
+            profileMap[p.id] = { nom: p.nom };
+          });
+        }
+        const next = (data || []).map((g) => ({
+          ...g,
+          commerce_nom: commercesList.find((c) => c.id === g.commerce_id)?.nom || 'Commerce',
+          gerant_nom: profileMap[g.user_id]?.nom
+        }));
+        setGerants(next);
+        cacheSet(cacheKey, { commerces: commercesList, gerants: next }, 86_400);
+      } else {
+        setGerants([]);
+        cacheSet(cacheKey, { commerces: commercesList, gerants: [] }, 86_400);
+      }
+    } catch (err) {
+      if (import.meta.env.DEV) console.warn('[GerantsPage] load', err);
+      const stale = cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(cacheKey);
+      if (stale) {
+        setCommerces(stale.commerces);
+        setGerants(stale.gerants);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [user, cacheKey, isOwner]);
+
+  useEffect(() => {
+    if (!user) {
+      setGerants([]);
+      setCommerces([]);
+      setLoading(false);
+      return;
+    }
+    const key = `gerants_page_${user.id}`;
+    const stale = cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(key);
+    if (stale) {
+      setCommerces(stale.commerces);
+      setGerants(stale.gerants);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    void load();
+  }, [user, load]);
 
   const handleAdd = async () => {
     if (addLock.current || saving) return;
@@ -118,7 +178,7 @@ export default function GerantsPage() {
     if (error) toast.error(error.message); else { toast.success('Gérant supprimé'); load(); }
   };
 
-  if (loading) return <div className="p-4"><SkeletonList count={3} /></div>;
+  if (loading && !skeletonCap) return <div className="p-4"><SkeletonList count={3} /></div>;
 
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto pb-32">
@@ -126,7 +186,7 @@ export default function GerantsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-foreground">Gérants</h1>
-          <p className="text-sm text-muted-foreground">{gerants.length} / {sub.limits.max_managers} gérant(s)</p>
+          <p className="text-sm text-muted-foreground">{visibleGerants.length} / {sub.limits.max_managers} gérant(s)</p>
         </div>
         {isOwner && (
           <Dialog open={open} onOpenChange={setOpen}>
@@ -175,11 +235,11 @@ export default function GerantsPage() {
         </div>
       )}
 
-      {gerants.length === 0 ? (
+      {visibleGerants.length === 0 ? (
         <EmptyState icon={Users} title="Aucun gérant" description="Ajoutez des gérants pour gérer vos commerces" actionLabel={isOwner ? "Ajouter un gérant" : undefined} onAction={isOwner ? () => setOpen(true) : undefined} />
       ) : (
         <div className="space-y-2">
-          {gerants.map((g, i) => (
+          {visibleGerants.map((g, i) => (
             <motion.div key={g.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
               className="bg-card rounded-xl p-4 border border-border active:scale-[0.98] transition-transform cursor-pointer"
               onClick={() => { setSelectedGerant(g); setDetailOpen(true); }}

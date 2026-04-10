@@ -32,7 +32,7 @@ interface Depense {
 
 export default function DepensesPage() {
   const { user } = useAuth();
-  const { commerceIds } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCommerceIds();
   const isOnline = useOnlineStatus();
   const [depenses, setDepenses] = useState<Depense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,11 +90,19 @@ export default function DepensesPage() {
     }
   };
 
-  useEffect(() => { load(); }, [user, isOnline, commerceIds.join(',')]);
+  useEffect(() => { load(); }, [user, isOnline, commerceLoading, commerceIds.join(',')]);
 
   const handleAdd = async () => {
-    if (!form.titre || !form.montant || !user || commerceIds.length === 0) {
+    if (!form.titre || !form.montant || !user) {
       toast.error('Titre et montant requis');
+      return;
+    }
+    if (commerceLoading) {
+      toast.info('Chargement de votre espace…');
+      return;
+    }
+    if (commerceIds.length === 0) {
+      toast.error('Connexion requise pour enregistrer une dépense.');
       return;
     }
     setSaving(true);

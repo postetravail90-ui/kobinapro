@@ -21,6 +21,7 @@ import LiveFeed, { type FeedEvent } from '@/components/gamification/LiveFeed';
 import DailyMissions, { type Mission } from '@/components/gamification/DailyMissions';
 import LevelBadge from '@/components/gamification/LevelBadge';
 import { useSubscription } from '@/hooks/useSubscription';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 export default function DashboardPage() {
   const { user, role } = useAuth();
@@ -41,6 +42,8 @@ export default function DashboardPage() {
   const [subscription, setSubscription] = useState<{ plan_type: string; trial_end_date: string | null; end_date: string | null } | null>(null);
   const [report, setReport] = useState<DailyReport | null>(null);
   const [totalTransactions, setTotalTransactions] = useState(0);
+  /** Après ce délai, on n’affiche plus le squelette même si le réseau traîne. */
+  const [skeletonCap, setSkeletonCap] = useState(false);
 
   const isManager = role === 'gerant';
   const isOwner = role === 'proprietaire' || role === 'super_admin';
@@ -137,6 +140,24 @@ export default function DashboardPage() {
   }, [stats]);
 
   useEffect(() => {
+    const t = setTimeout(() => setSkeletonCap(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const uid = user.id;
+    const st = cacheGetStale<DashboardStats>(`dashboard_stats_${uid}`);
+    const pr = cacheGetStale<{ nom: string }>(`dashboard_profile_${uid}`);
+    const tp = cacheGetStale<{ nom: string; total: number }[]>(`dashboard_top_${uid}`);
+    const rp = cacheGetStale<DailyReport>(`dashboard_report_${uid}`);
+    if (st) setStats(st);
+    if (pr) setProfile(pr);
+    if (tp?.length) setTopProduits(tp);
+    if (rp && isOwner) setReport(rp);
+  }, [user?.id, isOwner]);
+
+  useEffect(() => {
     if (!user || commerceLoading) return;
     const load = async () => {
       try {
@@ -151,7 +172,7 @@ export default function DashboardPage() {
         if (cachedReport && isOwner) setReport(cachedReport.data);
 
         const offlineSales = await getOfflineSales();
-        const offlineTotal = offlineSales.reduce((s, sale) => s + (sale.total || 0), 0);
+        const offlineTotal = offlineSales.reduce((s, sale) => s + Number(sale.total ?? 0), 0);
 
         if (!isOnline) {
           if (cachedStats) {
@@ -169,7 +190,10 @@ export default function DashboardPage() {
           supabase.from('profiles').select('nom').eq('id', user.id).single(),
         ]);
         setProfile(profileRes.data);
-        if (profileRes.data) await cacheDashboardData('profile', profileRes.data);
+        if (profileRes.data) {
+          await cacheDashboardData('profile', profileRes.data);
+          cacheSet(`dashboard_profile_${user.id}`, profileRes.data, 86_400);
+        }
 
         if (isOwner) {
           const { data: subData } = await supabase.from('subscriptions').select('plan_type, trial_end_date, end_date').eq('proprietaire_id', user.id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).single();
@@ -191,16 +215,18 @@ export default function DashboardPage() {
           dashStats.transactionsJour += offlineSales.length;
 
           setStats(dashStats);
-          // totalTransactions already set above
           await cacheDashboardData('stats', dashStats);
+          cacheSet(`dashboard_stats_${user.id}`, dashStats, 86_400);
 
           const topData = topRes.data?.map(p => ({ nom: p.produit_nom || '', total: Number(p.total_quantite) || 0 })) || [];
           setTopProduits(topData);
           await cacheDashboardData('topProduits', topData);
+          cacheSet(`dashboard_top_${user.id}`, topData, 86_400);
 
           if (dailyReport) {
             setReport(dailyReport);
             await cacheDashboardData('report', dailyReport);
+            cacheSet(`dashboard_report_${user.id}`, dailyReport, 86_400);
           }
         }
       } catch {
@@ -212,7 +238,7 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, role, commerceLoading, commerceIds.length, isOnline]);
 
-  if (loading || commerceLoading) {
+  if ((loading || commerceLoading) && !skeletonCap) {
     return (
       <div className="p-4 space-y-4">
         <div className="h-8 w-48 skeleton-shimmer rounded-lg" />

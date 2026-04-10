@@ -310,8 +310,12 @@ export default function SessionsPage() {
   const stopScanner = () => setScanning(false);
 
   const handleQuickAddProduct = async () => {
+    if (commerceLoading) {
+      toast.info('Chargement de votre espace…');
+      return;
+    }
     if (commerceIds.length === 0) {
-      toast.error('Aucun commerce disponible. Rechargez la page.');
+      toast.error('Connexion requise pour synchroniser votre commerce, ou patientez quelques secondes.');
       return;
     }
     const nomQ = newProductForm.nom.trim();
@@ -437,8 +441,20 @@ export default function SessionsPage() {
         gId = data?.[0]?.id;
       }
 
+      if (!gId && isOwner) {
+        const { data: mine, error: eMine } = await supabase
+          .from('gerants')
+          .select('id')
+          .eq('commerce_id', commerceId)
+          .eq('user_id', user.id)
+          .eq('actif', true)
+          .maybeSingle();
+        if (eMine) throw eMine;
+        gId = mine?.id ?? null;
+      }
+
       if (!gId) {
-        toast.error('Aucun gérant trouvé.');
+        toast.error('Aucun vendeur associé à ce commerce. Réessayez dans un instant ou vérifiez votre connexion.');
         return;
       }
 

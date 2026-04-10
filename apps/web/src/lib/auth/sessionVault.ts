@@ -65,6 +65,20 @@ export async function writeVault(payload: SessionVaultPayload): Promise<void> {
   }
 }
 
+/**
+ * Lecture synchrone du coffre web (localStorage uniquement) pour amorcer l’UI sans attendre le réseau.
+ * Sur natif, retourne null — utiliser `readVault()`.
+ */
+export function readVaultSync(): SessionVaultPayload | null {
+  if (Capacitor.isNativePlatform()) return null;
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(KEY) : null;
+    return raw ? (JSON.parse(raw) as SessionVaultPayload) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function clearVault(): Promise<void> {
   if (Capacitor.isNativePlatform()) {
     try {

@@ -7,10 +7,17 @@ import { isFetchFailure } from '@/lib/auth-errors';
 import { withUiTimeout } from '@/lib/async-timeout';
 import { ROLE_RESOLVE_MAX_MS } from '@/lib/network-timeouts';
 import { bootSession, persistSession, clearSession as clearOfflineSession } from '@/lib/auth/offlineAuth';
+import { readVaultSync } from '@/lib/auth/sessionVault';
 import type { User, Session } from '@supabase/supabase-js';
 
 function authSessionFingerprint(s: Session | null): string {
   return s?.user?.id && s.access_token ? `${s.user.id}:${s.access_token.slice(-12)}` : '';
+}
+
+function seedRoleFromVault(userId: string): AppRole | null {
+  const v = readVaultSync();
+  if (v?.user_id === userId && v.role) return v.role as AppRole;
+  return null;
 }
 
 interface AuthContextType {
@@ -19,9 +26,7 @@ interface AuthContextType {
   role: AppRole | null;
   authReady: boolean;
   loading: boolean;
-  /** Session dérivée du coffre local sans réseau (JWT expiré mais période de grâce). */
   isOfflineMode: boolean;
-  /** JWT expiré depuis plus de 30 jours — accès maintenu, bandeau possible. */
   softSessionWarning: boolean;
   signOut: () => Promise<void>;
   refreshRole: () => Promise<void>;
@@ -52,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const mountedRef = useRef(true);
   const lastSessionFingerprintRef = useRef<string>('');
 
+  /** Résout le rôle en ligne ; en cas d’échec réseau, ne modifie pas le rôle déjà affiché (coffre). */
   const resolveRole = useCallback(async (userId: string): Promise<AppRole | null> => {
     try {
       const resolved = await withUiTimeout(
@@ -63,7 +69,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return resolved;
     } catch (e) {
       console.warn('[Auth] resolveRole:', e);
-      if (mountedRef.current) setRole(null);
       return null;
     }
   }, []);
@@ -84,24 +89,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return false;
   }, []);
 
-  const applySession = useCallback(
-    async (next: Session | null, opts?: { force?: boolean }) => {
-      if (!mountedRef.current) return;
+  /** Mise à jour immédiate de session / user / rôle (coffre) — sans attente réseau. */
+  const commitSessionLocal = useCallback((next: Session | null, opts?: { force?: boolean }) => {
+    if (!mountedRef.current) return;
 
-      const fp = authSessionFingerprint(next);
-      if (!opts?.force && fp && fp === lastSessionFingerprintRef.current) {
-        return;
-      }
-      lastSessionFingerprintRef.current = next ? fp : '';
+    const fp = authSessionFingerprint(next);
+    if (!opts?.force && fp && fp === lastSessionFingerprintRef.current) {
+      return;
+    }
+    lastSessionFingerprintRef.current = next ? fp : '';
 
-      setSession(next);
-      setUser(next?.user ?? null);
+    setSession(next);
+    setUser(next?.user ?? null);
 
-      if (!next?.user) {
-        setRole(null);
-        return;
-      }
+    if (!next?.user) {
+      setRole(null);
+      return;
+    }
 
+    const seed = seedRoleFromVault(next.user.id);
+    if (seed) setRole(seed);
+  }, []);
+
+  /** Vérifications serveur + persistance coffre — en arrière-plan. */
+  const syncSessionRemote = useCallback(
+    async (next: Session | null) => {
+      if (!mountedRef.current || !next?.user) return;
       try {
         const blocked = await blockIfSuspended(next.user.id);
         if (blocked) {
@@ -115,8 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         registerPushNotifications(next.user.id).catch(() => {});
         await persistSession(next, next.user, resolvedRole);
       } catch (e) {
-        console.error('[Auth] résolution rôle:', e);
-        setRole(null);
+        console.error('[Auth] syncSessionRemote:', e);
       }
     },
     [blockIfSuspended, resolveRole]
@@ -135,13 +147,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     mountedRef.current = true;
     let subscription: { unsubscribe: () => void } | null = null;
 
+    const finishInitUI = () => {
+      if (mountedRef.current) {
+        setAuthReady(true);
+        setLoading(false);
+      }
+    };
+
     const init = async () => {
       try {
         const offlineBoot = await bootSession();
         if (offlineBoot) {
           if (offlineBoot.isOfflineMode) {
-            setSession(offlineBoot.session);
-            setUser(offlineBoot.user);
+            commitSessionLocal(offlineBoot.session, { force: true });
             setRole(offlineBoot.role);
             lastSessionFingerprintRef.current = authSessionFingerprint(offlineBoot.session);
             setIsOfflineMode(true);
@@ -149,7 +167,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } else {
             setIsOfflineMode(false);
             setSoftSessionWarning(offlineBoot.softSessionWarning);
-            await applySession(offlineBoot.session, { force: true });
+            commitSessionLocal(offlineBoot.session, { force: true });
+            if (offlineBoot.role) setRole(offlineBoot.role);
+            void syncSessionRemote(offlineBoot.session);
           }
         } else {
           const {
@@ -158,22 +178,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!mountedRef.current) return;
           setIsOfflineMode(false);
           setSoftSessionWarning(false);
-          await applySession(initial, { force: true });
+          commitSessionLocal(initial, { force: true });
+          if (initial?.user) {
+            const seed = seedRoleFromVault(initial.user.id);
+            if (seed) setRole(seed);
+            void syncSessionRemote(initial);
+          }
         }
       } catch (e) {
         console.error('[Auth] init:', e);
         const fallback = await bootSession();
         if (fallback) {
           if (fallback.isOfflineMode) {
-            setSession(fallback.session);
-            setUser(fallback.user);
+            commitSessionLocal(fallback.session, { force: true });
             setRole(fallback.role);
             lastSessionFingerprintRef.current = authSessionFingerprint(fallback.session);
             setIsOfflineMode(true);
             setSoftSessionWarning(fallback.softSessionWarning);
           } else {
-            await applySession(fallback.session, { force: true });
             setIsOfflineMode(false);
+            commitSessionLocal(fallback.session, { force: true });
+            if (fallback.role) setRole(fallback.role);
+            void syncSessionRemote(fallback.session);
           }
         } else if (isFetchFailure(e) && mountedRef.current) {
           setSession(null);
@@ -181,10 +207,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setRole(null);
         }
       } finally {
-        if (mountedRef.current) {
-          setAuthReady(true);
-          setLoading(false);
-        }
+        finishInitUI();
       }
 
       const { data } = supabase.auth.onAuthStateChange((_event, nextSession) => {
@@ -192,13 +215,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!mountedRef.current) return;
           const fp = authSessionFingerprint(nextSession);
           const duplicate = fp && fp === lastSessionFingerprintRef.current;
-          if (!duplicate) setLoading(true);
+          if (duplicate) return;
+
+          setLoading(true);
           try {
             if (nextSession?.user) {
               setIsOfflineMode(false);
               setSoftSessionWarning(false);
             }
-            await applySession(nextSession);
+            commitSessionLocal(nextSession, { force: true });
+            if (nextSession?.user) {
+              const seed = seedRoleFromVault(nextSession.user.id);
+              if (seed) setRole(seed);
+              void syncSessionRemote(nextSession);
+            } else {
+              setRole(null);
+            }
           } finally {
             if (mountedRef.current) {
               setAuthReady(true);
@@ -216,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mountedRef.current = false;
       subscription?.unsubscribe();
     };
-  }, [applySession]);
+  }, [commitSessionLocal, syncSessionRemote]);
 
   const signOut = async () => {
     try {

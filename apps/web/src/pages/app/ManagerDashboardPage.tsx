@@ -13,6 +13,7 @@ import { StatCard } from '@/components/ui/stat-card';
 import { SkeletonGrid } from '@/components/ui/skeleton-card';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 interface ManagerStats {
   ventesJour: number;
@@ -41,11 +42,25 @@ export default function ManagerDashboardPage() {
     depensesJour: 0, depensesCount: 0, produitsFaibles: 0, sessionsOuvertes: 0,
     montantAVerser: 0,
   });
+  const [skeletonCap, setSkeletonCap] = useState(false);
 
   const commerceName = commerces[0]?.nom || 'Commerce';
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
   const now = new Date();
   const greeting = now.getHours() < 12 ? 'Bonjour' : now.getHours() < 18 ? 'Bon après-midi' : 'Bonsoir';
+
+  useEffect(() => {
+    const t = setTimeout(() => setSkeletonCap(true), 3000);
+    return () => clearTimeout(t);
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const st = cacheGetStale<ManagerStats>(`manager_dashboard_${user.id}`);
+    const pr = cacheGetStale<{ nom: string }>(`manager_profile_${user.id}`);
+    if (st) setStats(st);
+    if (pr) setProfile(pr);
+  }, [user?.id]);
 
   const load = useCallback(async () => {
     if (!user || commerceIds.length === 0) { setLoading(false); return; }
@@ -74,14 +89,24 @@ export default function ManagerDashboardPage() {
       const produitsFaibles = products.filter(p => p.stock < 5).length;
       const montantAVerser = ventesJour - depensesJour;
 
-      setStats({
+      const next: ManagerStats = {
         ventesJour, transactionsJour, creditsJour, creditsCount,
         depensesJour, depensesCount, produitsFaibles,
         sessionsOuvertes: sessionsRes.count || 0,
         montantAVerser,
-      });
+      };
+      setStats(next);
+      if (user) {
+        cacheSet(`manager_dashboard_${user.id}`, next, 86_400);
+        if (profileRes.data) cacheSet(`manager_profile_${user.id}`, profileRes.data, 86_400);
+      }
     } catch {
-      // silently fail
+      if (user) {
+        const st = cacheGetStale<ManagerStats>(`manager_dashboard_${user.id}`);
+        const pr = cacheGetStale<{ nom: string }>(`manager_profile_${user.id}`);
+        if (st) setStats(st);
+        if (pr) setProfile(pr);
+      }
     }
     setLoading(false);
   }, [user, commerceIds, today, products]);
@@ -91,7 +116,7 @@ export default function ManagerDashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commerceLoading, commerceIds.length]);
 
-  if (loading || commerceLoading) {
+  if ((loading || commerceLoading) && !skeletonCap) {
     return (
       <div className="p-4 space-y-4">
         <div className="h-8 w-48 skeleton-shimmer rounded-lg" />

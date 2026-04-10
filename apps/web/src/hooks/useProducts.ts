@@ -12,7 +12,7 @@ export function useProducts(commerceIds: string[], opts?: { hideCosting?: boolea
     queryKey: ["products", idsKey],
     queryFn: () => getProducts(commerceIds),
     staleTime: Infinity,
-    enabled: commerceIds.length > 0
+    enabled: true,
   });
 
   const raw = query.data ?? [];

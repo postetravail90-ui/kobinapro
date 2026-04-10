@@ -169,18 +169,23 @@ export function useSubscription(): SubscriptionState {
           let prodCount = 0;
 
           if (commerceIds.length > 0) {
-            const [gerRes, prodRes] = await Promise.all([
-              supabase
-                .from('gerants')
-                .select('id', { count: 'exact', head: true })
-                .in('commerce_id', commerceIds),
+            const [gerRows, commRows, prodRes] = await Promise.all([
+              supabase.from('gerants').select('id, user_id, commerce_id').in('commerce_id', commerceIds),
+              supabase.from('commerces').select('id, proprietaire_id').in('id', commerceIds),
               supabase
                 .from('produits')
                 .select('id', { count: 'exact', head: true })
                 .eq('actif', true)
                 .in('commerce_id', commerceIds),
             ]);
-            gerCount = gerRes.count || 0;
+            if (!gerRows.error && !commRows.error) {
+              const ownerByCommerce = new Map(
+                (commRows.data || []).map((c) => [c.id, c.proprietaire_id])
+              );
+              gerCount = (gerRows.data || []).filter(
+                (g) => ownerByCommerce.get(g.commerce_id) !== g.user_id
+              ).length;
+            }
             prodCount = prodRes.count || 0;
           }
 
