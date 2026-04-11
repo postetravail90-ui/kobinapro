@@ -44,13 +44,13 @@ export default function DepensesPage() {
     if (!user || commerceIds.length === 0) { setLoading(false); return; }
     try {
       const offlineDeps = await getOfflineDepenses();
-      const offlineItems: Depense[] = offlineDeps.map(d => ({
-        id: d.id,
-        titre: d.titre,
-        montant: d.montant,
-        description: d.description || null,
-        created_at: d.created_at || new Date().toISOString(),
-        created_by: d.created_by || d.user_id || '',
+      const offlineItems: Depense[] = offlineDeps.map((d) => ({
+        id: String(d.id),
+        titre: String(d.titre ?? ''),
+        montant: Number(d.montant ?? 0),
+        description: d.description != null ? String(d.description) : null,
+        created_at: String(d.created_at || new Date().toISOString()),
+        created_by: String(d.created_by || d.user_id || ''),
         _offline: true,
       }));
 

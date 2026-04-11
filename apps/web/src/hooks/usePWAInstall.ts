@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Capacitor } from '@capacitor/core';
 
+/** beforeinstallprompt (non standard) */
+type DeferredInstallPrompt = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
+};
+
 interface PWAInstallState {
   /** The deferred prompt is available and install can be triggered */
   canInstall: boolean;
@@ -15,12 +21,14 @@ interface PWAInstallState {
 }
 
 export function usePWAInstall(): PWAInstallState {
-  const deferredPrompt = useRef<any>(null);
+  const deferredPrompt = useRef<DeferredInstallPrompt | null>(null);
   const [canInstall, setCanInstall] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [installed, setInstalled] = useState(false);
 
-  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+  const isIOS =
+    /iPad|iPhone|iPod/.test(navigator.userAgent) &&
+    typeof (window as Window & { MSStream?: unknown }).MSStream === 'undefined';
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
@@ -32,9 +40,10 @@ export function usePWAInstall(): PWAInstallState {
     }
 
     // Check standalone mode
+    const nav = window.navigator as Navigator & { standalone?: boolean };
     const standalone =
       window.matchMedia('(display-mode: standalone)').matches ||
-      (window.navigator as any).standalone === true;
+      nav.standalone === true;
     setIsStandalone(standalone);
 
     if (standalone) {
@@ -45,7 +54,7 @@ export function usePWAInstall(): PWAInstallState {
     // Listen for the install prompt
     const onBeforeInstall = (e: Event) => {
       e.preventDefault();
-      deferredPrompt.current = e;
+      deferredPrompt.current = e as DeferredInstallPrompt;
       setCanInstall(true);
       console.log('[PWA] beforeinstallprompt captured ✓');
     };

@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
+
+type ManagerPermRow = Database['public']['Tables']['manager_permissions']['Row'];
+type ManagerPermInsert = Database['public']['Tables']['manager_permissions']['Insert'];
+type ManagerPermUpdate = Database['public']['Tables']['manager_permissions']['Update'];
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, Shield, Store, Phone, ChevronDown, ChevronUp } from 'lucide-react';
@@ -67,11 +72,11 @@ export default function ManagerPermissionsPanel() {
 
     const gerantIds = gerantsData.map(g => g.id);
     const { data: permsData } = await supabase
-      .from('manager_permissions' as any)
+      .from('manager_permissions')
       .select('*')
       .in('manager_id', gerantIds);
 
-    const permsMap = new Map((permsData || []).map((p: any) => [p.manager_id, p]));
+    const permsMap = new Map((permsData || []).map((p) => [p.manager_id, p as ManagerPermRow]));
 
     const userIds = gerantsData.map(g => g.user_id);
     const { data: profiles } = await supabase
@@ -82,11 +87,13 @@ export default function ManagerPermissionsPanel() {
     const profileMap = new Map((profiles || []).map(p => [p.id, p]));
 
     const result: GerantWithPerms[] = gerantsData.map(g => {
-      const perm = permsMap.get(g.id) as any;
+      const perm = permsMap.get(g.id);
       const profile = profileMap.get(g.user_id);
       const permObj: Record<string, boolean> = {};
-      Object.keys(PERM_LABELS).forEach(key => {
-        permObj[key] = perm ? (perm[key] ?? true) : true;
+      (Object.keys(PERM_LABELS) as (keyof typeof PERM_LABELS)[]).forEach((key) => {
+        const col = key as keyof ManagerPermRow;
+        const v = perm?.[col];
+        permObj[key] = typeof v === 'boolean' ? v : true;
       });
 
       return {
@@ -111,9 +118,14 @@ export default function ManagerPermissionsPanel() {
     ));
 
     if (gerant.perm_id) {
+      const patch: ManagerPermUpdate = {
+        [key]: value,
+        updated_at: new Date().toISOString(),
+        updated_by: user?.id ?? null,
+      } as ManagerPermUpdate;
       const { error } = await supabase
-        .from('manager_permissions' as any)
-        .update({ [key]: value, updated_at: new Date().toISOString(), updated_by: user?.id } as any)
+        .from('manager_permissions')
+        .update(patch)
         .eq('id', gerant.perm_id);
 
       if (error) {
@@ -126,9 +138,14 @@ export default function ManagerPermissionsPanel() {
         return;
       }
     } else {
+      const insertRow: ManagerPermInsert = {
+        manager_id: gerant.id,
+        [key]: value,
+        updated_by: user?.id ?? null,
+      } as ManagerPermInsert;
       const { data, error } = await supabase
-        .from('manager_permissions' as any)
-        .insert({ manager_id: gerant.id, [key]: value, updated_by: user?.id } as any)
+        .from('manager_permissions')
+        .insert(insertRow)
         .select()
         .single();
 
@@ -136,8 +153,9 @@ export default function ManagerPermissionsPanel() {
         toast.error('Erreur lors de la création');
         return;
       }
+      const row = data as ManagerPermRow | null;
       setGerants(prev => prev.map(g =>
-        g.id === gerant.id ? { ...g, perm_id: (data as any)?.id } : g
+        g.id === gerant.id ? { ...g, perm_id: row?.id } : g
       ));
     }
 

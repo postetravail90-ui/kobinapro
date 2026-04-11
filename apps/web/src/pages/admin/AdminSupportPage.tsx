@@ -1,5 +1,6 @@
 import { useEffect, useState, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { SkeletonCard } from '@/components/ui/skeleton-card';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,32 +11,12 @@ import {
   Zap, BarChart3, X
 } from 'lucide-react';
 
-type Priority = 'critical' | 'high' | 'normal' | 'low';
-type Status = 'open' | 'pending' | 'in_progress' | 'resolved' | 'closed';
-type Category = 'technical_issue' | 'payment_issue' | 'account_problem' | 'bug_report' | 'general_question';
-
-interface Ticket {
-  id: string;
-  user_id: string;
-  subject: string;
-  message: string;
-  priority: Priority;
-  status: Status;
-  category: Category;
-  assigned_agent: string | null;
-  resolved_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-interface TicketMessage {
-  id: string;
-  ticket_id: string;
-  sender_id: string;
-  message: string;
-  is_agent: boolean;
-  created_at: string;
-}
+type Priority = Database['public']['Enums']['ticket_priority'];
+type Status = Database['public']['Enums']['ticket_status'];
+type Category = Database['public']['Enums']['ticket_category'];
+type Ticket = Database['public']['Tables']['support_tickets']['Row'];
+type TicketMessage = Database['public']['Tables']['ticket_messages']['Row'];
+type TicketUpdate = Database['public']['Tables']['support_tickets']['Update'];
 
 const priorityConfig: Record<Priority, { label: string; color: string; bg: string }> = {
   critical: { label: 'Critique', color: 'text-destructive', bg: 'bg-destructive/10' },
@@ -79,7 +60,7 @@ export default function AdminSupportPage() {
       .select('*')
       .order('created_at', { ascending: false })
       .limit(500);
-    setTickets((data as any as Ticket[]) || []);
+    setTickets(data ?? []);
     setLoading(false);
   };
 
@@ -103,7 +84,7 @@ export default function AdminSupportPage() {
       .select('*')
       .eq('ticket_id', ticketId)
       .order('created_at', { ascending: true });
-    setMessages((data as any as TicketMessage[]) || []);
+    setMessages(data ?? []);
     setLoadingMessages(false);
   };
 
@@ -120,14 +101,14 @@ export default function AdminSupportPage() {
       sender_id: user.id,
       message: replyText.trim(),
       is_agent: true,
-    } as any);
+    });
     if (!error) {
       // Update ticket status to in_progress if open
       if (selectedTicket.status === 'open') {
         await supabase.from('support_tickets')
-          .update({ status: 'in_progress', assigned_agent: user.id } as any)
+          .update({ status: 'in_progress', assigned_agent: user.id })
           .eq('id', selectedTicket.id);
-        setSelectedTicket({ ...selectedTicket, status: 'in_progress' as Status, assigned_agent: user.id });
+        setSelectedTicket({ ...selectedTicket, status: 'in_progress', assigned_agent: user.id });
       }
       setReplyText('');
       loadMessages(selectedTicket.id);
@@ -140,7 +121,7 @@ export default function AdminSupportPage() {
 
   const updateTicketStatus = async (status: Status) => {
     if (!selectedTicket) return;
-    const updates: any = { status };
+    const updates: TicketUpdate = { status };
     if (status === 'resolved') updates.resolved_at = new Date().toISOString();
     await supabase.from('support_tickets').update(updates).eq('id', selectedTicket.id);
     setSelectedTicket({ ...selectedTicket, ...updates });
@@ -292,12 +273,12 @@ export default function AdminSupportPage() {
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher un ticket…"
             className="w-full bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30 text-foreground placeholder:text-muted-foreground" />
         </div>
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as any)}
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value as Status | 'all')}
           className="bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none">
           <option value="all">Tous statuts</option>
           {Object.entries(statusConfig).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
         </select>
-        <select value={filterPriority} onChange={e => setFilterPriority(e.target.value as any)}
+        <select value={filterPriority} onChange={e => setFilterPriority(e.target.value as Priority | 'all')}
           className="bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground outline-none">
           <option value="all">Toutes priorités</option>
           {Object.entries(priorityConfig).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}

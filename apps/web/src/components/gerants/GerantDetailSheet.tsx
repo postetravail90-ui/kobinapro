@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import type { LucideIcon } from 'lucide-react';
 import { Users, ShoppingBag, Wallet, Clock, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
@@ -137,7 +138,7 @@ export default function GerantDetailSheet({ gerant, open, onClose, onToggle, onD
   );
 }
 
-function StatCard({ icon: Icon, label, value, color }: { icon: any; label: string; value: string; color: string }) {
+function StatCard({ icon: Icon, label, value, color }: { icon: LucideIcon; label: string; value: string; color: string }) {
   return (
     <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="bg-muted rounded-xl p-3">
       <Icon size={16} className={`${color} mb-1.5`} />

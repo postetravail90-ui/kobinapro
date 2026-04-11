@@ -5,13 +5,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
 import { motion } from 'framer-motion';
+import type { Json } from '@/integrations/supabase/types';
 
 interface LogRow {
   id: string;
   action: string;
   created_at: string;
   user_id: string | null;
-  metadata: any;
+  metadata: Json | null;
 }
 
 export default function AdminLogsPage() {

@@ -3,6 +3,10 @@
  * file stock séparée, anti-doublons (idempotence vente + file), curseur sortie.
  */
 import { supabase } from '@/integrations/supabase/client';
+import type { Database, Json } from '@/integrations/supabase/types';
+
+type PublicTable = keyof Database['public']['Tables'];
+type PublicFn = keyof Database['public']['Functions'];
 import { payCredit } from '@/services/sales';
 import {
   getSyncQueue,
@@ -141,18 +145,19 @@ async function processSaleBatch(syncedRef: { n: number }) {
         }
 
         if (sale.user_id) {
+          const meta: Json = {
+            mode: String(sale.mode ?? ''),
+            total: Number(sale.total ?? 0),
+            commerce_id: String(sale.commerce_id ?? ''),
+            offline_id: String(sale.id ?? ''),
+            offline_date: String(sale.created_at ?? ''),
+            synced_by: String(sale.user_name || 'unknown'),
+            facture_id: String(factureId),
+          };
           await supabase.rpc('log_activity', {
-            _user_id: sale.user_id,
+            _user_id: String(sale.user_id),
             _action: 'vente_offline_sync',
-            _metadata: {
-              mode: sale.mode,
-              total: sale.total,
-              commerce_id: sale.commerce_id,
-              offline_id: sale.id,
-              offline_date: sale.created_at,
-              synced_by: sale.user_name || 'unknown',
-              facture_id: factureId,
-            },
+            _metadata: meta,
           });
         }
 
@@ -228,16 +233,20 @@ async function processOneSyncItem(item: SyncQueueItem, syncedRef: { n: number })
   try {
     let success = false;
     if (item.action === 'insert') {
-      const { error } = await supabase.from(item.table as never).insert(item.payload as never);
+      const { error } = await supabase
+        .from(item.table as PublicTable)
+        .insert(item.payload as never);
       success = !error;
       if (!success && isUniqueViolation(error)) success = true;
     } else if (item.action === 'update') {
-      const { id: rowId, ...rest } = item.payload as { id: string };
-      const { error } = await supabase.from(item.table as never).update(rest).eq('id', rowId);
+      const { id: rowId, ...rest } = item.payload as { id: string; [key: string]: unknown };
+      // Chaîne PostgREST + table dynamique : le typage union ne résout pas `.eq` ici.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { error } = await (supabase.from(item.table as PublicTable) as any).update(rest).eq('id', rowId);
       success = !error;
     } else if (item.action === 'rpc') {
-      const { fn_name, ...args } = item.payload as { fn_name: string };
-      const { error } = await supabase.rpc(fn_name, args);
+      const { fn_name, ...args } = item.payload as { fn_name: string } & Record<string, unknown>;
+      const { error } = await supabase.rpc(fn_name as PublicFn, args as never);
       success = !error;
     }
 
@@ -304,13 +313,14 @@ async function processDepensesBatch(syncedRef: { n: number }) {
       await updateOfflineDepense(depId, { sync_status: 'syncing' });
 
       try {
-        const { error } = await supabase.from('depenses').insert({
-          commerce_id: dep.commerce_id,
-          titre: dep.titre,
-          description: dep.description || null,
-          montant: dep.montant,
-          created_by: dep.created_by || dep.user_id,
-        });
+        const depInsert: Database['public']['Tables']['depenses']['Insert'] = {
+          commerce_id: String(dep.commerce_id),
+          titre: String(dep.titre),
+          description: dep.description != null ? String(dep.description) : null,
+          montant: Number(dep.montant),
+          created_by: String(dep.created_by || dep.user_id || ''),
+        };
+        const { error } = await supabase.from('depenses').insert(depInsert);
         if (error) {
           if (isUniqueViolation(error)) {
             await removeOfflineDepense(depId);
@@ -346,13 +356,14 @@ async function processMessagesBatch(syncedRef: { n: number }) {
   for (const batch of chunkArray(msgs, BATCH_MESSAGES)) {
     for (const msg of batch) {
       try {
-        const { error } = await supabase.from('messages').insert({
-          sender_id: msg.sender_id,
-          receiver_id: msg.receiver_id,
-          commerce_id: msg.commerce_id,
-          message: msg.message,
-          type: msg.type || 'text',
-        });
+        const msgInsert: Database['public']['Tables']['messages']['Insert'] = {
+          sender_id: String(msg.sender_id),
+          receiver_id: String(msg.receiver_id),
+          commerce_id: String(msg.commerce_id),
+          message: String(msg.message ?? ''),
+          type: String(msg.type || 'text'),
+        };
+        const { error } = await supabase.from('messages').insert(msgInsert);
         if (!error) {
           await removeOfflineMessage(String(msg.id));
           syncedRef.n++;

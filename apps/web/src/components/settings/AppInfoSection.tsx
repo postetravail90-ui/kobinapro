@@ -1,6 +1,15 @@
 import { forwardRef } from 'react';
 import { Monitor, Globe, Smartphone, Download, RefreshCw, Info, Keyboard, ExternalLink, Share } from 'lucide-react';
-import { APP_VERSION, APP_NAME, WINDOWS_DOWNLOAD_URL, getPlatform, getPlatformLabel, isTauri, isDesktopMode } from '@/lib/platform';
+import {
+  APP_VERSION,
+  APP_NAME,
+  WINDOWS_DOWNLOAD_URL,
+  getPlatform,
+  getPlatformLabel,
+  isTauri,
+  isDesktopMode,
+  getTauriGlobal,
+} from '@/lib/platform';
 import { Button } from '@/components/ui/button';
 import { useState, useCallback } from 'react';
 import { usePWAInstall } from '@/hooks/usePWAInstall';
@@ -38,7 +47,7 @@ const AppInfoSection = forwardRef<HTMLDivElement>((_, ref) => {
 
     if (isTauri()) {
       try {
-        const tauri = (window as any).__TAURI__;
+        const tauri = getTauriGlobal();
         if (tauri?.updater) {
           const { shouldUpdate } = await tauri.updater.checkUpdate();
           setUpdateResult(shouldUpdate ? 'Mise à jour disponible ! Redémarrez l\'app.' : 'Vous êtes à jour ✓');

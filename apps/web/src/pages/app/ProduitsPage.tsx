@@ -16,6 +16,7 @@ import ProductDetailSheet from '@/components/products/ProductDetailSheet';
 import BackButton from '@/components/BackButton';
 import { parsePrixInput } from '@/lib/prix-input';
 import { createProduct, updateProduct } from '@/lib/data/products';
+import type { Html5Qrcode } from 'html5-qrcode';
 
 export default function ProduitsPage() {
   const { user, role } = useAuth();
@@ -31,7 +32,7 @@ export default function ProduitsPage() {
   const [scanning, setScanning] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<CachedProduct | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const scannerRef = useRef<any>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
   // USB barcode scanner
   const barcodeBuffer = useRef('');

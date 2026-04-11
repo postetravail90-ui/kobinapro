@@ -153,8 +153,9 @@ export default function AbonnementsPage() {
       } else {
         toast.error("Impossible d'initialiser le paiement");
       }
-    } catch (e: any) {
-      toast.error(e?.message || 'Erreur de paiement');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Erreur de paiement';
+      toast.error(msg);
     } finally {
       setPaying(null);
     }

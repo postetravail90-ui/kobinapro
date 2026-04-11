@@ -80,7 +80,7 @@ export default function ManagerDashboardPage() {
       const transactionsJour = salesRes.data?.reduce((s, r) => s + (r.transactions_count || 0), 0) || 0;
 
       const todayCredits = creditsRes.data?.filter(c => c.created_at?.startsWith(today)) || [];
-      const creditsJour = todayCredits.reduce((s, r) => s + Number((r as any).total_amount || 0), 0);
+      const creditsJour = todayCredits.reduce((s, r) => s + Number(r.total_amount || 0), 0);
       const creditsCount = todayCredits.length;
 
       const depensesJour = depensesRes.data?.reduce((s, r) => s + Number(r.montant || 0), 0) || 0;

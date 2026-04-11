@@ -3,7 +3,7 @@
  * Handles receipt printing for both web and Tauri desktop
  */
 
-import { isTauri } from './platform';
+import { isTauri, getTauriGlobal } from './platform';
 
 interface PrintOptions {
   title?: string;
@@ -60,7 +60,7 @@ export function printHTML({ title = 'KOBINA PRO - Reçu', html, width = 300 }: P
 export async function saveReceiptPDF(html: string, _filename: string = 'recu.pdf'): Promise<void> {
   if (isTauri()) {
     try {
-      const tauri = (window as any).__TAURI__;
+      const tauri = getTauriGlobal();
       if (tauri?.dialog?.save && tauri?.fs?.writeTextFile) {
         const path = await tauri.dialog.save({
           defaultPath: _filename.replace('.pdf', '.html'),

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Bell, Volume2, ShoppingBag, TrendingDown, MessageSquare, AlertTriangle, CreditCard, Shield, ArrowLeft } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { useNavigate } from 'react-router-dom';
@@ -77,12 +78,18 @@ export default function NotificationSettingsPage() {
     if (!user) return;
     setPrefs(prev => ({ ...prev, [key]: value }));
 
-    const { error } = await supabase
-      .from('notification_preferences')
-      .upsert(
-        { user_id: user.id, [key]: value, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' }
-      );
+    const next: Database['public']['Tables']['notification_preferences']['Insert'] = {
+      user_id: user.id,
+      updated_at: new Date().toISOString(),
+      notify_sales: key === 'notify_sales' ? value : prefs.notify_sales,
+      notify_expenses: key === 'notify_expenses' ? value : prefs.notify_expenses,
+      notify_messages: key === 'notify_messages' ? value : prefs.notify_messages,
+      notify_stock: key === 'notify_stock' ? value : prefs.notify_stock,
+      notify_subscription: key === 'notify_subscription' ? value : prefs.notify_subscription,
+      notify_security: key === 'notify_security' ? value : prefs.notify_security,
+      sound_enabled: key === 'sound_enabled' ? value : prefs.sound_enabled,
+    };
+    const { error } = await supabase.from('notification_preferences').upsert(next, { onConflict: 'user_id' });
 
     if (error) {
       toast.error('Erreur de sauvegarde');

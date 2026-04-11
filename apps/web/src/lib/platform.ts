@@ -7,6 +7,28 @@ import { Capacitor } from '@capacitor/core';
 
 export type AppPlatform = 'web' | 'pwa' | 'desktop' | 'android' | 'ios';
 
+/** Tauri v1 global — partial typing for APIs used from guarded web code */
+export interface TauriGlobal {
+  dialog?: {
+    save: (options: {
+      defaultPath?: string;
+      filters?: { name: string; extensions: string[] }[];
+    }) => Promise<string | null>;
+  };
+  fs?: { writeTextFile: (path: string, contents: string) => Promise<void> };
+  notification?: {
+    isPermissionGranted: () => Promise<boolean>;
+    requestPermission: () => Promise<string>;
+    sendNotification: (opts: { title: string; body: string }) => void;
+  };
+  updater?: { checkUpdate: () => Promise<{ shouldUpdate: boolean }> };
+}
+
+export function getTauriGlobal(): TauriGlobal | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return (window as Window & { __TAURI__?: TauriGlobal }).__TAURI__;
+}
+
 /** Check if running inside Tauri desktop wrapper */
 export const isTauri = (): boolean => {
   return typeof window !== 'undefined' && '__TAURI__' in window;
@@ -15,9 +37,10 @@ export const isTauri = (): boolean => {
 /** Check if running as installed PWA */
 export const isPWA = (): boolean => {
   if (typeof window === 'undefined') return false;
+  const nav = window.navigator as Navigator & { standalone?: boolean };
   return (
     window.matchMedia('(display-mode: standalone)').matches ||
-    (window.navigator as any).standalone === true
+    nav.standalone === true
   );
 };
 
@@ -68,8 +91,7 @@ export const isDesktopMode = (): boolean => {
 export const sendDesktopNotification = async (title: string, body: string): Promise<void> => {
   if (isTauri()) {
     try {
-      // Dynamic import — only resolves inside Tauri runtime
-      const tauri = (window as any).__TAURI__;
+      const tauri = getTauriGlobal();
       if (tauri?.notification) {
         const granted = await tauri.notification.isPermissionGranted();
         if (!granted) await tauri.notification.requestPermission();

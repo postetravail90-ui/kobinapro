@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import type { Html5Qrcode } from 'html5-qrcode';
 import { X, Flashlight, FlashlightOff, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion } from 'framer-motion';
@@ -15,7 +16,7 @@ export default function BarcodeScanner({ onScan, onClose, continuous = true }: B
   const [flashOn, setFlashOn] = useState(false);
   const [lastScanned, setLastScanned] = useState('');
   const [scanCount, setScanCount] = useState(0);
-  const scannerRef = useRef<any>(null);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
   const cooldownRef = useRef(false);
 
@@ -45,8 +46,8 @@ export default function BarcodeScanner({ onScan, onClose, continuous = true }: B
 
       // Cleanup previous
       if (scannerRef.current) {
-        try { await scannerRef.current.stop(); } catch {}
-        try { scannerRef.current.clear(); } catch {}
+        try { await scannerRef.current.stop(); } catch { /* stop peut échouer si déjà arrêté */ }
+        try { scannerRef.current.clear(); } catch { /* idem */ }
       }
 
       const scanner = new Html5Qrcode('barcode-reader', { verbose: false });
@@ -102,11 +103,11 @@ export default function BarcodeScanner({ onScan, onClose, continuous = true }: B
 
     return () => {
       if (scannerRef.current) {
-        scannerRef.current.stop().catch(() => {});
-        try { scannerRef.current.clear(); } catch {}
+        scannerRef.current.stop().catch(() => { /* cleanup */ });
+        try { scannerRef.current.clear(); } catch { /* cleanup */ }
       }
     };
-  }, []);
+  }, [initScanner]);
 
   const toggleFlash = async () => {
     const track = trackRef.current;
@@ -115,10 +116,13 @@ export default function BarcodeScanner({ onScan, onClose, continuous = true }: B
       return;
     }
     try {
-      const capabilities = track.getCapabilities() as any;
+      type CapWithTorch = MediaTrackCapabilities & { torch?: boolean };
+      const capabilities = track.getCapabilities() as CapWithTorch;
       if (capabilities.torch) {
         const newState = !flashOn;
-        await track.applyConstraints({ advanced: [{ torch: newState } as any] });
+        await track.applyConstraints({
+          advanced: [{ torch: newState }],
+        } as unknown as MediaTrackConstraints);
         setFlashOn(newState);
       } else {
         toast.error('Flash non supporté');

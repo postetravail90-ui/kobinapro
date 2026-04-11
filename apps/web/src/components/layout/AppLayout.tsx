@@ -1,12 +1,13 @@
 import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Package, Users, Receipt, CreditCard,
   Crown, Settings, LogOut, Bell, Menu, X, ChefHat, Wallet, Shield, Store,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
-import { useManagerPermissions } from '@/hooks/useManagerPermissions';
+import { useManagerPermissions, type ManagerPermissionKey } from '@/hooks/useManagerPermissions';
 import { useNotifications, usePushRouting } from '@/hooks/useNotifications';
 import kobinaLogo from '@/assets/kobina-pro-logo.png';
 import OfflineBanner from '@/components/OfflineBanner';
@@ -18,10 +19,10 @@ const OnboardingWizard = lazy(() => import('@/components/onboarding/OnboardingWi
 
 interface NavItem {
   to: string;
-  icon: any;
+  icon: LucideIcon;
   label: string;
   end?: boolean;
-  permKey?: string;
+  permKey?: ManagerPermissionKey;
 }
 
 // Propriétaire (navigation plate, sans groupes repliables)
@@ -147,14 +148,14 @@ export default function AppLayout() {
 
   const filteredManagerItems = useMemo(() => {
     return managerSidebarItems.filter(item =>
-      !item.permKey || (permissions as any)[item.permKey]
+      !item.permKey || permissions[item.permKey]
     );
   }, [permissions]);
 
   const mobileNav = useMemo(() => {
     if (!isManager) return ownerMobileNav;
     return managerMobileNav.filter(item =>
-      !item.permKey || (permissions as any)[item.permKey]
+      !item.permKey || permissions[item.permKey]
     );
   }, [isManager, permissions]);
 

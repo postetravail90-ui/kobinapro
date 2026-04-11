@@ -1,5 +1,6 @@
 import { supabase } from '@/integrations/supabase/client';
 import { cacheProducts, getCachedProducts, getCachedProductByBarcode } from '@/lib/offline-db';
+import type { ProductCacheRow } from '@/lib/local/local-types';
 
 export interface Product {
   id: string;
@@ -36,7 +37,7 @@ export async function fetchProducts(commerceIds: string[], page = 0, limit = 100
  */
 export async function fetchAndCacheProducts(commerceIds: string[]): Promise<Product[]> {
   const products = await fetchProducts(commerceIds);
-  await cacheProducts(products);
+  await cacheProducts(products as unknown as ProductCacheRow[]);
   return products;
 }
 
@@ -46,7 +47,7 @@ export async function fetchAndCacheProducts(commerceIds: string[]): Promise<Prod
 export async function findByBarcode(barcode: string, commerceId?: string): Promise<Product | null> {
   // Local first
   const cached = await getCachedProductByBarcode(barcode);
-  if (cached) return cached;
+  if (cached) return cached as unknown as Product;
 
   // Server fallback
   let query = supabase

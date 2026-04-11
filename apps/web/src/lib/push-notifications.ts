@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 import { Capacitor } from '@capacitor/core';
 import {
   PushNotifications,
@@ -227,7 +228,7 @@ export function showInAppNotification(title: string, body: string, onClick?: () 
  * Listen for push messages from service worker (foreground handling)
  */
 export function setupPushListener(
-  onNotification: (notification: { title: string; body: string; data: any }) => void,
+  onNotification: (notification: { title: string; body: string; data: Json }) => void,
   onNavigate: (route: string) => void
 ) {
   if (isNativeMobilePlatform()) {

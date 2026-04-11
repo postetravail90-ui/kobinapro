@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 
 /**
  * Create an in-app notification and optionally send a push.
@@ -20,7 +21,7 @@ export async function createNotification({
   title: string;
   body: string;
   route?: string;
-  data?: Record<string, any>;
+  data?: Json;
   sendPush?: boolean;
 }) {
   // Insert in-app notification
@@ -42,12 +43,19 @@ export async function createNotification({
   // Send push notification via edge function
   if (sendPush) {
     try {
+      const spreadable =
+        data !== undefined &&
+        typeof data === 'object' &&
+        data !== null &&
+        !Array.isArray(data)
+          ? (data as Record<string, Json>)
+          : ({} as Record<string, Json>);
       await supabase.functions.invoke('send-push', {
         body: {
           user_id: userId,
           title,
           body,
-          data: { type, route: route || '', ...data },
+          data: { type, route: route || '', ...spreadable },
         },
       });
     } catch (err) {

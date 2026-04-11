@@ -13,6 +13,7 @@ import { SkeletonList } from '@/components/ui/skeleton-card';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
+import type { Database } from '@/integrations/supabase/types';
 import UpgradePrompt from '@/components/UpgradePrompt';
 import BackButton from '@/components/BackButton';
 
@@ -88,7 +89,7 @@ export default function CommercesPage() {
       .from('commerces')
       .insert({
         nom: form.nom.trim(),
-        type: form.type as any,
+        type: form.type as Database['public']['Enums']['commerce_type'],
         adresse: form.adresse.trim() || null,
         proprietaire_id: user.id,
         statut: 'actif',

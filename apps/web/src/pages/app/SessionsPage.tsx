@@ -39,6 +39,7 @@ import type { ReceiptData } from '@/lib/receipt-utils';
 import { toUiErrorMessage } from '@/lib/ui-errors';
 import { parsePrixInput } from '@/lib/prix-input';
 import { createProduct } from '@/lib/data/products';
+import type { ProductCacheRow } from '@/lib/local/local-types';
 
 interface CartItem {
   produit: CachedProduct;
@@ -51,7 +52,9 @@ let audioCtx: AudioContext | null = null;
 
 function getAudioCtx() {
   if (!audioCtx && typeof window !== 'undefined') {
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const w = window as Window & { webkitAudioContext?: typeof AudioContext };
+    const AC = window.AudioContext || w.webkitAudioContext;
+    if (AC) audioCtx = new AC();
   }
   return audioCtx;
 }
@@ -366,7 +369,7 @@ export default function SessionsPage() {
         const { addToSyncQueue, cacheProducts, getCachedProducts } = await import('@/lib/offline-db');
         const cached = await getCachedProducts();
 
-        await cacheProducts([localProduct, ...cached]);
+        await cacheProducts([localProduct as unknown as ProductCacheRow, ...cached]);
         await addToSyncQueue({
           table: 'produits',
           action: 'insert',

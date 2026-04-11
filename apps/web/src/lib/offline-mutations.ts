@@ -1,8 +1,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import { ensureSyncEngine } from "@/lib/sync";
 
-/** Tables pour les INSERT simples file + Supabase (aligné schéma prod). */
-export type OfflineInsertTable = "produits" | "depenses";
+/**
+ * Tables pour les INSERT file + Supabase.
+ * Schéma prod : `produits`, `depenses`. Les autres noms viennent de pages legacy / démo.
+ */
+export type OfflineInsertTable = string;
 
 /**
  * Enfile une opération puis tente l’INSERT tout de suite.
@@ -26,12 +29,15 @@ export async function createWithOfflineQueue<T extends Record<string, unknown> =
     status: "pending"
   });
 
-  const { data, error } = await supabase.from(table).insert({ id, ...payload }).select("*").single();
+  const row = { id, ...payload };
+  // Table dynamique (schéma prod + pages legacy) — le client typé n'accepte qu'un union fini.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).from(table).insert(row).select("*").single();
 
   if (error) {
     return { error: new Error(error.message), data: null };
   }
 
   await engine.flushOnce();
-  return { error: null, data: data as T | null };
+  return { error: null, data: data as unknown as T | null };
 }

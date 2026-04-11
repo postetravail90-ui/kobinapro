@@ -1,11 +1,12 @@
+import type { LucideIcon } from 'lucide-react';
 import { Bell, Check, CheckCheck, AlertTriangle, ShoppingBag, CreditCard, Users, Shield, MessageSquare } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { motion } from 'framer-motion';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useNotifications, type AppNotification } from '@/hooks/useNotifications';
 import { useNavigate } from 'react-router-dom';
 import { Skeleton } from '@/components/ui/skeleton';
 
-const typeIcon: Record<string, any> = {
+const typeIcon: Record<string, LucideIcon> = {
   sale: ShoppingBag,
   stock_alert: AlertTriangle,
   credit: CreditCard,
@@ -33,7 +34,7 @@ export default function NotificationsPage() {
   const { notifications, loading, unreadCount, markRead, markAllRead } = useNotifications();
   const navigate = useNavigate();
 
-  const handleClick = (n: any) => {
+  const handleClick = (n: AppNotification) => {
     if (!n.read) markRead(n.id);
     if (n.route) navigate(n.route);
   };

@@ -78,11 +78,13 @@ export default function FidelitePage() {
     } else {
       // Offline: load from cache
       const cachedCards = await getCachedLoyaltyCards();
-      setCards(cachedCards.filter(c => c.commerce_id === commerceId));
+      setCards(
+        cachedCards.filter((c) => String(c.commerce_id) === commerceId) as unknown as LoyaltyCard[]
+      );
 
       const cachedSettings = await getCachedLoyaltySettings(commerceId);
       if (cachedSettings) {
-        setSettings(cachedSettings);
+        setSettings(cachedSettings as unknown as LoyaltySettings);
         setSettingsForm({
           points_per_fcfa: String(cachedSettings.points_per_fcfa),
           reward_threshold: String(cachedSettings.reward_threshold),
@@ -114,16 +116,17 @@ export default function FidelitePage() {
 
     if (!isOnline) {
       // Save locally and queue for sync
-      await cacheLoyaltyCards([newCard, ...cards]);
+      await cacheLoyaltyCards([newCard, ...cards] as unknown as Record<string, unknown>[]);
+      const syncPayload: Record<string, unknown> = {
+        commerce_id: newCard.commerce_id,
+        client_name: newCard.client_name,
+        client_phone: newCard.client_phone,
+        card_code: newCard.card_code,
+      };
       await addToSyncQueue({
         table: 'loyalty_cards',
         action: 'insert',
-        payload: {
-          commerce_id: newCard.commerce_id,
-          client_name: newCard.client_name,
-          client_phone: newCard.client_phone,
-          card_code: newCard.card_code,
-        },
+        payload: syncPayload,
         priority: 'normal',
       });
       setSaving(false);

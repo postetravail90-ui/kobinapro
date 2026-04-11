@@ -1,6 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Database } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
+
+type ManagerPermRow = Database['public']['Tables']['manager_permissions']['Row'];
 
 export interface ManagerPermissions {
   can_sell: boolean;
@@ -15,6 +18,8 @@ export interface ManagerPermissions {
   can_view_sales_history: boolean;
   can_print_receipt: boolean;
 }
+
+export type ManagerPermissionKey = keyof ManagerPermissions;
 
 const ALL_ENABLED: ManagerPermissions = {
   can_sell: true,
@@ -60,24 +65,25 @@ export function useManagerPermissions() {
       }
 
       const { data } = await supabase
-        .from('manager_permissions' as any)
+        .from('manager_permissions')
         .select('*')
         .eq('manager_id', gerant.id)
         .maybeSingle();
 
       if (data) {
+        const row = data as ManagerPermRow;
         setPermissions({
-          can_sell: (data as any).can_sell ?? true,
-          can_manage_products: (data as any).can_manage_products ?? true,
-          can_add_stock: (data as any).can_add_stock ?? true,
-          can_add_products: (data as any).can_add_products ?? true,
-          can_use_sessions: (data as any).can_use_sessions ?? true,
-          can_add_expenses: (data as any).can_add_expenses ?? true,
-          can_use_credit: (data as any).can_use_credit ?? true,
-          can_use_messaging: (data as any).can_use_messaging ?? true,
-          can_scan_barcode: (data as any).can_scan_barcode ?? true,
-          can_view_sales_history: (data as any).can_view_sales_history ?? true,
-          can_print_receipt: (data as any).can_print_receipt ?? true,
+          can_sell: row.can_sell ?? true,
+          can_manage_products: row.can_manage_products ?? true,
+          can_add_stock: row.can_add_stock ?? true,
+          can_add_products: row.can_add_products ?? true,
+          can_use_sessions: row.can_use_sessions ?? true,
+          can_add_expenses: row.can_add_expenses ?? true,
+          can_use_credit: row.can_use_credit ?? true,
+          can_use_messaging: row.can_use_messaging ?? true,
+          can_scan_barcode: row.can_scan_barcode ?? true,
+          can_view_sales_history: row.can_view_sales_history ?? true,
+          can_print_receipt: row.can_print_receipt ?? true,
         });
       }
     } catch {

@@ -8,6 +8,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/hooks/useSubscription';
 import { toast } from 'sonner';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
+import type { Database } from '@/integrations/supabase/types';
+
+type CommerceBrandingRow = Database['public']['Tables']['commerce_branding']['Row'];
 
 interface Props {
   open: boolean;
@@ -18,7 +21,7 @@ interface Props {
 export default function ReceiptSheet({ open, onClose, data }: Props) {
   const { user } = useAuth();
   const sub = useSubscription();
-  const [branding, setBranding] = useState<any>(null);
+  const [branding, setBranding] = useState<CommerceBrandingRow | null>(null);
 
   // Branding : cache local d’abord, puis mise à jour silencieuse en arrière-plan
   useEffect(() => {
@@ -26,7 +29,7 @@ export default function ReceiptSheet({ open, onClose, data }: Props) {
     const cacheKey = `receipt_branding_${user.id}`;
     const stale = cacheGetStale<Record<string, unknown>>(cacheKey);
     if (stale && Object.keys(stale).length > 0) {
-      setBranding(stale);
+      setBranding(stale as CommerceBrandingRow);
     }
 
     let cancelled = false;
@@ -50,10 +53,10 @@ export default function ReceiptSheet({ open, onClose, data }: Props) {
           const gCommId = gerantData?.[0]?.commerce_id;
           if (gCommId) {
             const { data: b, error: e2 } = await supabase
-              .from('commerce_branding' as any)
+              .from('commerce_branding')
               .select('*')
               .eq('commerce_id', gCommId)
-              .maybeSingle() as any;
+              .maybeSingle();
             if (e2) throw e2;
             if (!cancelled && b) {
               setBranding(b);
@@ -63,10 +66,10 @@ export default function ReceiptSheet({ open, onClose, data }: Props) {
           return;
         }
         const { data: b, error: e3 } = await supabase
-          .from('commerce_branding' as any)
+          .from('commerce_branding')
           .select('*')
           .eq('commerce_id', commerceId)
-          .maybeSingle() as any;
+          .maybeSingle();
         if (e3) throw e3;
         if (!cancelled && b) {
           setBranding(b);

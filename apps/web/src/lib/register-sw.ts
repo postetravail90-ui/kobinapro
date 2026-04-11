@@ -1,5 +1,10 @@
 import { processQueue } from './sync-processor';
 
+/** Background Sync API (non standard) */
+interface ServiceWorkerRegistrationWithSync extends ServiceWorkerRegistration {
+  sync: { register: (tag: string) => Promise<void> };
+}
+
 export function registerServiceWorker() {
   // En dev, le SW casse Vite (/@vite/client, HMR, modules). On désinscrit les SW résiduels.
   if (import.meta.env.DEV) {
@@ -18,8 +23,9 @@ export function registerServiceWorker() {
 
         // Register Background Sync if supported
         if ('sync' in reg) {
-          // Will be triggered when we go back online
-          await (reg as any).sync.register('sync-data').catch(() => {});
+          await (reg as ServiceWorkerRegistrationWithSync).sync
+            .register('sync-data')
+            .catch(() => { /* non supporté ou refusé */ });
         }
 
         // Listen for sync requests from SW
@@ -40,7 +46,9 @@ export async function requestBackgroundSync() {
   if ('serviceWorker' in navigator) {
     const reg = await navigator.serviceWorker.ready;
     if ('sync' in reg) {
-      await (reg as any).sync.register('sync-data').catch(() => {});
+      await (reg as ServiceWorkerRegistrationWithSync).sync
+        .register('sync-data')
+        .catch(() => { /* idem */ });
     }
   }
 }

@@ -1,16 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { setupPushListener } from '@/lib/push-notifications';
 import { useNavigate } from 'react-router-dom';
 
-interface AppNotification {
+export interface AppNotification {
   id: string;
   type: string;
   title: string;
   body: string;
-  data: Record<string, any>;
+  data: Json;
   route: string | null;
   read: boolean;
   created_at: string;
@@ -35,7 +36,7 @@ export function useNotifications() {
 
     if (!error && data) {
       setNotifications(data as AppNotification[]);
-      setUnreadCount(data.filter((n: any) => !n.read).length);
+      setUnreadCount(data.filter((n) => !(n as { read?: boolean }).read).length);
     }
     setLoading(false);
   }, [user]);

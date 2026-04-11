@@ -5,11 +5,15 @@ import { StatCard } from '@/components/ui/stat-card';
 import { SkeletonCard } from '@/components/ui/skeleton-card';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 import { motion } from 'framer-motion';
+import type { Database } from '@/integrations/supabase/types';
+
+type TopProduitRow = Database['public']['Views']['vue_top_produits']['Row'];
+type LongSessionRow = Database['public']['Views']['vue_sessions_longues']['Row'];
 
 export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
-  const [topProduits, setTopProduits] = useState<any[]>([]);
-  const [longSessions, setLongSessions] = useState<any[]>([]);
+  const [topProduits, setTopProduits] = useState<TopProduitRow[]>([]);
+  const [longSessions, setLongSessions] = useState<LongSessionRow[]>([]);
   const [totalVentes, setTotalVentes] = useState(0);
 
   useEffect(() => {

@@ -1,6 +1,6 @@
 import { createRoot } from "react-dom/client";
 import ErrorBoundary from "./components/ErrorBoundary";
-import App from "./App.tsx";
+import App from "./App";
 import "./index.css";
 import { registerServiceWorker } from "./lib/register-sw";
 import { initLocalDataLayer } from "./lib/local/offline-store";

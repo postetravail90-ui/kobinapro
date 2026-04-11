@@ -12,6 +12,10 @@ import { Switch } from '@/components/ui/switch';
 import ManagerPermissionsPanel from '@/components/manager/ManagerPermissionsPanel';
 import { useSubscription } from '@/hooks/useSubscription';
 import BackButton from '@/components/BackButton';
+import type { Database } from '@/integrations/supabase/types';
+
+type SubscriptionRow = Database['public']['Tables']['subscriptions']['Row'];
+type CommerceBrandingInsert = Database['public']['Tables']['commerce_branding']['Insert'];
 
 const ALLOWED_IMAGE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const MAX_IMAGE_SIZE = 2 * 1024 * 1024; // 2MB
@@ -21,7 +25,7 @@ export default function ParametresPage() {
   const sub = useSubscription();
   const [profile, setProfile] = useState({ nom: '', numero: '', commune: '', photo_url: '' });
   const [saving, setSaving] = useState(false);
-  const [subscription, setSubscription] = useState<any>(null);
+  const [subscription, setSubscription] = useState<SubscriptionRow | null>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
 
   // Branding state
@@ -49,9 +53,13 @@ export default function ParametresPage() {
       setSubscription(subRes.data || null);
 
       if (isOwner && commRes.data) {
-        const comm = commRes.data as any;
+        const comm = commRes.data;
         setCommerceId(comm.id);
-        const { data: b } = await supabase.from('commerce_branding' as any).select('*').eq('commerce_id', comm.id).maybeSingle() as any;
+        const { data: b } = await supabase
+          .from('commerce_branding')
+          .select('*')
+          .eq('commerce_id', comm.id)
+          .maybeSingle();
         if (b) setBranding({
           display_name: b.display_name || '',
           phone: b.phone || '',
@@ -92,7 +100,7 @@ export default function ParametresPage() {
       await supabase.from('profiles').update({ photo_url: photoUrl }).eq('id', user.id);
       setProfile(p => ({ ...p, photo_url: photoUrl }));
       toast.success('Photo de profil mise à jour');
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.error('Impossible de charger l\'image pour le moment');
       console.error('Profile photo upload error:', err);
     } finally {
@@ -111,7 +119,7 @@ export default function ParametresPage() {
   const saveBranding = async () => {
     if (!commerceId) return;
     setBrandingSaving(true);
-    const payload = {
+    const payload: CommerceBrandingInsert = {
       commerce_id: commerceId,
       display_name: branding.display_name || null,
       phone: branding.phone || null,
@@ -122,8 +130,8 @@ export default function ParametresPage() {
     };
 
     const { error } = await supabase
-      .from('commerce_branding' as any)
-      .upsert(payload as any, { onConflict: 'commerce_id' });
+      .from('commerce_branding')
+      .upsert(payload, { onConflict: 'commerce_id' });
 
     setBrandingSaving(false);
     if (error) toast.error(error.message);
@@ -149,7 +157,7 @@ export default function ParametresPage() {
       const logoUrl = `${urlData.publicUrl}?t=${Date.now()}`;
       setBranding(b => ({ ...b, logo_url: logoUrl }));
       toast.success('Logo mis à jour avec succès');
-    } catch (err: any) {
+    } catch (err: unknown) {
       toast.error('Impossible de charger l\'image pour le moment');
       console.error('Logo upload error:', err);
     } finally {

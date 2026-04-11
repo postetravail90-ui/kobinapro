@@ -13,7 +13,7 @@ export function useOnlineStatus() {
     let cancelled = false;
     let removeListener: (() => void) | undefined;
 
-    const useCapNetwork = async () => {
+    const setupNativeNetwork = async () => {
       const { Network } = await import('@capacitor/network');
       const status = await Network.getStatus();
       if (!cancelled) setIsOnline(status.connected);
@@ -26,7 +26,7 @@ export function useOnlineStatus() {
     };
 
     if (Capacitor.isNativePlatform()) {
-      void useCapNetwork();
+      void setupNativeNetwork();
       return () => {
         cancelled = true;
         removeListener?.();

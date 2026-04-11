@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, type ComponentType } from 'react';
 import {
   MessageCircle, Send, ArrowLeft, Smile, Image as ImageIcon,
   Mic, MicOff, Check, CheckCheck, Circle
@@ -14,9 +14,20 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { toast } from 'sonner';
 
+type EmojiMartSelection = { native: string };
+type EmojiPickerProps = {
+  data: unknown;
+  onEmojiSelect: (emoji: EmojiMartSelection) => void;
+  locale: string;
+  theme: string;
+  previewPosition: string;
+  skinTonePosition: string;
+  set: string;
+};
+
 // Lazy emoji picker
-let EmojiPicker: any = null;
-let emojiData: any = null;
+let EmojiPicker: ComponentType<EmojiPickerProps> | null = null;
+let emojiData: unknown = null;
 
 export default function MessagesPage() {
   const { user } = useAuth();
@@ -49,7 +60,7 @@ export default function MessagesPage() {
         import('@emoji-mart/react'),
         import('@emoji-mart/data'),
       ]);
-      EmojiPicker = pickerModule.default;
+      EmojiPicker = pickerModule.default as ComponentType<EmojiPickerProps>;
       emojiData = dataModule.default;
     }
     setShowEmoji(prev => !prev);
@@ -315,7 +326,7 @@ export default function MessagesPage() {
           >
             <EmojiPicker
               data={emojiData}
-              onEmojiSelect={(emoji: any) => setInput(prev => prev + emoji.native)}
+              onEmojiSelect={(emoji) => setInput(prev => prev + emoji.native)}
               locale="fr"
               theme="auto"
               previewPosition="none"
