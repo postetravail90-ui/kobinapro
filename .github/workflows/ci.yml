@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (packages + mobile)
+        run: pnpm run typecheck:libs
+
+      - name: Typecheck web
+        run: pnpm --filter @kobina/web typecheck
+
+      - name: Lint web
+        run: pnpm --filter @kobina/web lint
+
+      - name: Test web
+        run: pnpm --filter @kobina/web test
+
+      - name: Build web
+        run: pnpm --filter @kobina/web build
+        env:
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_PUBLISHABLE_KEY: placeholder
+          VITE_SYNC_BATCH_ENDPOINT: https://placeholder.supabase.co/functions/v1/sync-batch
