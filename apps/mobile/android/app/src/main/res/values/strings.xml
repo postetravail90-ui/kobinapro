@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">KOBINA PRO</string>
+    <string name="title_activity_main">KOBINA PRO</string>
+    <string name="package_name">pro.kobina.app</string>
+    <string name="custom_url_scheme">pro.kobina.app</string>
+</resources>
