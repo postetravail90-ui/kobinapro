@@ -52,7 +52,7 @@ export class OfflineSyncEngine {
   private readonly client: SyncClient;
   private readonly conflictPolicyByTable: Record<string, ConflictPolicy>;
   private syncing = false;
-  private onPendingCountChanged?: (count: number) => void;
+  private onPendingCountChanged: ((count: number) => void) | undefined;
 
   constructor(
     store: SyncStore,

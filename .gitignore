@@ -8,6 +8,13 @@ build
 !.env.example
 coverage
 *.log
-apps/mobile/android
-apps/mobile/ios
+# android/ et ios/ sont versionnés pour cloner → build natif sans `cap add` manquant.
+# Décommenter si vous préférez régénérer localement uniquement :
+# apps/mobile/android
+# apps/mobile/ios
 apps/desktop/src-tauri/target
+
+# IDE (ne pas versionner les réglages machine-locaux)
+.idea/
+**/.idea/
+*.iml

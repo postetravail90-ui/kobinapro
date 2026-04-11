@@ -3,14 +3,21 @@
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "pnpm -r build",
     "dev": "pnpm --filter @kobina/web dev",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",
+    "typecheck:libs": "pnpm --filter @kobina/core typecheck && pnpm --filter @kobina/db typecheck && pnpm --filter @kobina/sync typecheck && pnpm --filter @kobina/ui typecheck && pnpm --filter @kobina/mobile typecheck",
+    "validate": "pnpm run typecheck:libs && pnpm --filter @kobina/web typecheck && pnpm run lint:web && pnpm --filter @kobina/web test && pnpm --filter @kobina/web build",
+    "lint:web": "pnpm --filter @kobina/web lint",
     "db:generate": "pnpm --filter @kobina/db db:generate",
     "db:migrate": "pnpm --filter @kobina/db db:migrate",
-    "mobile:sync": "pnpm --filter @kobina/mobile cap:sync"
+    "mobile:sync": "pnpm --filter @kobina/web build && pnpm --filter @kobina/mobile cap:sync",
+    "mobile:open": "pnpm --filter @kobina/mobile exec cap open android"
   }
 }
