@@ -45,3 +45,26 @@ export function cacheClear(key: string): void {
     /* ignore */
   }
 }
+
+/** Alias pratique (TTL en ms) — mêmes clés `kobina_v1_*` que `cacheSet` / `cacheGet`. */
+export const cache = {
+  set(key: string, data: unknown, ttlMs = 1000 * 60 * 60 * 24) {
+    cacheSet(key, data, Math.max(1, Math.floor(ttlMs / 1000)));
+  },
+  get: cacheGet,
+  getStale: cacheGetStale,
+  set_ts(key: string) {
+    try {
+      localStorage.setItem(`kobina_${CACHE_VERSION}_ts_${key}`, String(Date.now()));
+    } catch {
+      /* ignore */
+    }
+  },
+  get_ts(key: string): number {
+    try {
+      return Number(localStorage.getItem(`kobina_${CACHE_VERSION}_ts_${key}`) ?? 0);
+    } catch {
+      return 0;
+    }
+  },
+};

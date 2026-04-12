@@ -45,8 +45,8 @@ export function ExpensesPage(): JSX.Element {
           </Button>
         </div>
       </Card>
-      {expenses.isLoading ? <Card>Chargement...</Card> : null}
-      {expenses.isError ? <Card>Erreur de chargement.</Card> : null}
+      {expenses.isPending && !(expenses.data?.length) ? <Card>Chargement...</Card> : null}
+      {expenses.isError && !(expenses.data?.length) ? <Card>Aucune donnée disponible pour le moment.</Card> : null}
       {(expenses.data ?? []).map((e) => (
         <Card key={e.id}>
           {e.category} - {e.amount.toLocaleString()} XOF

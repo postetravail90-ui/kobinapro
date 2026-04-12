@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { getDb, tryGetDb } from "@/lib/db";
 import { supabase } from "@/integrations/supabase/client";
 
 let debouncedFlush: ReturnType<typeof setTimeout> | null = null;
@@ -67,7 +67,8 @@ export async function enqueue(
 }
 
 export async function getPendingCount(): Promise<number> {
-  const db = getDb();
+  const db = tryGetDb();
+  if (!db) return 0;
   const row = await db.get<{ c: number }>(
     "SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','syncing')"
   );
@@ -76,7 +77,8 @@ export async function getPendingCount(): Promise<number> {
 
 /** Inclut `error` pour ne jamais abandonner une opération : retry automatique à chaque flush. */
 export async function listPending(limit = 50): Promise<SyncOperation[]> {
-  const db = getDb();
+  const db = tryGetDb();
+  if (!db) return [];
   const rows = await db.all<Record<string, unknown>>(
     "SELECT * FROM sync_queue WHERE status IN ('pending','error') ORDER BY created_at ASC LIMIT ?",
     [limit]
@@ -108,7 +110,8 @@ export async function clearSynced(): Promise<void> {
 }
 
 export async function listErrors(limit = 50): Promise<SyncOperation[]> {
-  const db = getDb();
+  const db = tryGetDb();
+  if (!db) return [];
   const rows = await db.all<Record<string, unknown>>(
     "SELECT * FROM sync_queue WHERE status = 'error' ORDER BY created_at DESC LIMIT ?",
     [limit]
@@ -126,6 +129,7 @@ export async function resetErrorToPending(id: string): Promise<void> {
 
 /** Traite la file (à brancher sur l’Edge `sync-batch` ou appels Supabase directs). */
 export async function processQueue(): Promise<void> {
+  if (!tryGetDb()) return;
   const pending = await listPending(50);
   if (pending.length === 0) return;
 

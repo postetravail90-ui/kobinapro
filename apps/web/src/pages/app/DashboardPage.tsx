@@ -13,6 +13,7 @@ import { fetchDashboardStats, fetchDailyReport, type DashboardStats, type DailyR
 import { cacheDashboardData, getCachedDashboardData, getOfflineSales } from '@/lib/offline-db';
 import { StatCard } from '@/components/ui/stat-card';
 import { SkeletonGrid } from '@/components/ui/skeleton-card';
+import { SmartLoader } from '@/components/ui/SmartLoader';
 import { motion } from 'framer-motion';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid } from 'recharts';
 import { Link, useNavigate } from 'react-router-dom';
@@ -22,6 +23,15 @@ import DailyMissions, { type Mission } from '@/components/gamification/DailyMiss
 import LevelBadge from '@/components/gamification/LevelBadge';
 import { useSubscription } from '@/hooks/useSubscription';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
+
+interface DashboardSnapshotCache {
+  stats: DashboardStats;
+  profile: { nom: string } | null;
+  topProduits: { nom: string; total: number }[];
+  report: DailyReport | null;
+  subscription: { plan_type: string; trial_end_date: string | null; end_date: string | null } | null;
+  totalTransactions: number;
+}
 
 export default function DashboardPage() {
   const { user, role } = useAuth();
@@ -42,8 +52,8 @@ export default function DashboardPage() {
   const [subscription, setSubscription] = useState<{ plan_type: string; trial_end_date: string | null; end_date: string | null } | null>(null);
   const [report, setReport] = useState<DailyReport | null>(null);
   const [totalTransactions, setTotalTransactions] = useState(0);
-  /** Après ce délai, on n’affiche plus le squelette même si le réseau traîne. */
-  const [skeletonCap, setSkeletonCap] = useState(false);
+  /** Données affichables (cache stale, IndexedDB ou réponse OK) — évite le squelette bloquant. */
+  const [hasHydratedData, setHasHydratedData] = useState(false);
 
   const isManager = role === 'gerant';
   const isOwner = role === 'proprietaire' || role === 'super_admin';
@@ -140,36 +150,120 @@ export default function DashboardPage() {
   }, [stats]);
 
   useEffect(() => {
-    const t = setTimeout(() => setSkeletonCap(true), 3000);
-    return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
     if (!user) return;
     const uid = user.id;
-    const st = cacheGetStale<DashboardStats>(`dashboard_stats_${uid}`);
-    const pr = cacheGetStale<{ nom: string }>(`dashboard_profile_${uid}`);
-    const tp = cacheGetStale<{ nom: string; total: number }[]>(`dashboard_top_${uid}`);
-    const rp = cacheGetStale<DailyReport>(`dashboard_report_${uid}`);
-    if (st) setStats(st);
-    if (pr) setProfile(pr);
-    if (tp?.length) setTopProduits(tp);
-    if (rp && isOwner) setReport(rp);
+    const bundle = cacheGetStale<DashboardSnapshotCache>(`dashboard:${uid}`);
+    let any = false;
+    if (bundle) {
+      setStats(bundle.stats);
+      if (bundle.profile) setProfile(bundle.profile);
+      if (bundle.topProduits?.length) setTopProduits(bundle.topProduits);
+      if (bundle.report && isOwner) setReport(bundle.report);
+      if (bundle.subscription !== undefined) setSubscription(bundle.subscription);
+      setTotalTransactions(bundle.totalTransactions);
+      any = true;
+    }
+    if (!bundle?.stats) {
+      const st = cacheGetStale<DashboardStats>(`dashboard_stats_${uid}`);
+      if (st) {
+        setStats(st);
+        any = true;
+      }
+    }
+    if (!bundle?.profile) {
+      const pr = cacheGetStale<{ nom: string }>(`dashboard_profile_${uid}`);
+      if (pr) {
+        setProfile(pr);
+        any = true;
+      }
+    }
+    if (!bundle?.topProduits?.length) {
+      const tp = cacheGetStale<{ nom: string; total: number }[]>(`dashboard_top_${uid}`);
+      if (tp?.length) {
+        setTopProduits(tp);
+        any = true;
+      }
+    }
+    if (!bundle?.report && isOwner) {
+      const rp = cacheGetStale<DailyReport>(`dashboard_report_${uid}`);
+      if (rp) {
+        setReport(rp);
+        any = true;
+      }
+    }
+    if (any) setHasHydratedData(true);
   }, [user?.id, isOwner]);
 
   useEffect(() => {
     if (!user || commerceLoading) return;
     const load = async () => {
+      const uid = user.id;
+      const applyStaleFromLs = () => {
+        const b = cacheGetStale<DashboardSnapshotCache>(`dashboard:${uid}`);
+        let any = false;
+        if (b) {
+          setStats(b.stats);
+          if (b.profile) setProfile(b.profile);
+          if (b.topProduits?.length) setTopProduits(b.topProduits);
+          if (b.report && isOwner) setReport(b.report);
+          if (b.subscription !== undefined) setSubscription(b.subscription);
+          setTotalTransactions(b.totalTransactions);
+          any = true;
+        }
+        if (!b?.stats) {
+          const st = cacheGetStale<DashboardStats>(`dashboard_stats_${uid}`);
+          if (st) {
+            setStats(st);
+            any = true;
+          }
+        }
+        if (!b?.profile) {
+          const pr = cacheGetStale<{ nom: string }>(`dashboard_profile_${uid}`);
+          if (pr) {
+            setProfile(pr);
+            any = true;
+          }
+        }
+        if (!b?.topProduits?.length) {
+          const tp = cacheGetStale<{ nom: string; total: number }[]>(`dashboard_top_${uid}`);
+          if (tp?.length) {
+            setTopProduits(tp);
+            any = true;
+          }
+        }
+        if (!b?.report && isOwner) {
+          const rp = cacheGetStale<DailyReport>(`dashboard_report_${uid}`);
+          if (rp) {
+            setReport(rp);
+            any = true;
+          }
+        }
+        if (any) setHasHydratedData(true);
+      };
+      applyStaleFromLs();
+
       try {
         const cachedStats = await getCachedDashboardData<DashboardStats>('stats');
         const cachedReport = await getCachedDashboardData<DailyReport>('report');
         const cachedProfile = await getCachedDashboardData<{ nom: string }>('profile');
         const cachedTop = await getCachedDashboardData<{ nom: string; total: number }[]>('topProduits');
 
-        if (cachedStats) setStats(cachedStats.data);
-        if (cachedProfile) setProfile(cachedProfile.data);
-        if (cachedTop) setTopProduits(cachedTop.data);
-        if (cachedReport && isOwner) setReport(cachedReport.data);
+        if (cachedStats) {
+          setStats(cachedStats.data);
+          setHasHydratedData(true);
+        }
+        if (cachedProfile) {
+          setProfile(cachedProfile.data);
+          setHasHydratedData(true);
+        }
+        if (cachedTop) {
+          setTopProduits(cachedTop.data);
+          setHasHydratedData(true);
+        }
+        if (cachedReport && isOwner) {
+          setReport(cachedReport.data);
+          setHasHydratedData(true);
+        }
 
         const offlineSales = await getOfflineSales();
         const offlineTotal = offlineSales.reduce((s, sale) => s + Number(sale.total ?? 0), 0);
@@ -182,6 +276,7 @@ export default function DashboardPage() {
               transactionsJour: prev.transactionsJour + offlineSales.length,
             }));
           }
+          setHasHydratedData(true);
           setLoading(false);
           return;
         }
@@ -195,9 +290,11 @@ export default function DashboardPage() {
           cacheSet(`dashboard_profile_${user.id}`, profileRes.data, 86_400);
         }
 
+        let subscriptionSnap: { plan_type: string; trial_end_date: string | null; end_date: string | null } | null = null;
         if (isOwner) {
           const { data: subData } = await supabase.from('subscriptions').select('plan_type, trial_end_date, end_date').eq('proprietaire_id', user.id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).single();
           setSubscription(subData);
+          subscriptionSnap = subData ?? null;
         }
 
         if (commerceIds.length > 0) {
@@ -228,9 +325,23 @@ export default function DashboardPage() {
             await cacheDashboardData('report', dailyReport);
             cacheSet(`dashboard_report_${user.id}`, dailyReport, 86_400);
           }
+
+          cacheSet(
+            `dashboard:${user.id}`,
+            {
+              stats: dashStats,
+              profile: profileRes.data ?? null,
+              topProduits: topData,
+              report: dailyReport ?? null,
+              subscription: subscriptionSnap,
+              totalTransactions: txCount || 0,
+            },
+            86_400
+          );
         }
+        setHasHydratedData(true);
       } catch {
-        // Fail silently — cache data already shown
+        applyStaleFromLs();
       }
       setLoading(false);
     };
@@ -238,18 +349,19 @@ export default function DashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, role, commerceLoading, commerceIds.length, isOnline]);
 
-  if ((loading || commerceLoading) && !skeletonCap) {
-    return (
-      <div className="p-4 space-y-4">
-        <div className="h-8 w-48 skeleton-shimmer rounded-lg" />
-        <SkeletonGrid count={4} />
-      </div>
-    );
-  }
-
   const planLabel: Record<string, string> = { free: 'Gratuit', commerce_1: 'Formule 1', multi_3: 'Formule 2', multi_6: 'Formule 3', multi_10: 'Formule 4' };
 
   return (
+    <SmartLoader
+      loading={loading || commerceLoading}
+      hasData={hasHydratedData}
+      skeleton={
+        <div className="p-4 space-y-4">
+          <div className="h-8 w-48 skeleton-shimmer rounded-lg" />
+          <SkeletonGrid count={4} />
+        </div>
+      }
+    >
     <div className="p-4 space-y-5 max-w-6xl mx-auto pb-32">
       {/* Header + Level badge */}
       <div className="flex items-center justify-between">
@@ -507,5 +619,6 @@ export default function DashboardPage() {
         </div>
       )}
     </div>
+    </SmartLoader>
   );
 }

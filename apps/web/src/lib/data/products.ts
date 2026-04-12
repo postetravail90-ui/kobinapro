@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { Capacitor } from "@capacitor/core";
 import { getDb } from "@/lib/db";
 import { enqueue } from "@/lib/sync/queue";
 import { ensureBusinessLocalId } from "./business";
@@ -28,7 +29,9 @@ function rowToProduct(
 }
 
 async function hydrateProductsFromServer(commerceServerIds: string[]): Promise<void> {
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  const blockByNavigatorOffline =
+    Capacitor.isNativePlatform() && typeof navigator !== "undefined" && !navigator.onLine;
+  if (blockByNavigatorOffline) return;
   const { data, error } = await supabase
     .from("produits")
     .select(

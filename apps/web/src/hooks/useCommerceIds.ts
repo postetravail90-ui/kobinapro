@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { Capacitor } from "@capacitor/core";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { getCache, setCache } from "@/lib/offline-db";
@@ -70,9 +71,12 @@ export function useCommerceIds() {
           hydratedRef.current = true;
         }
 
-        const online = typeof navigator !== "undefined" && navigator.onLine;
+        /** Sur le navigateur, `navigator.onLine` est souvent faux (IP LAN, Windows) — on tente quand même le bootstrap Supabase. Sur natif, on respecte l’indicateur pour éviter des inserts inutiles hors-ligne. */
+        const allowRemoteCommerceBootstrap =
+          !Capacitor.isNativePlatform() ||
+          (typeof navigator !== "undefined" && navigator.onLine);
 
-        if (role === "proprietaire" && online) {
+        if (role === "proprietaire" && allowRemoteCommerceBootstrap) {
           const meta = user.user_metadata as Record<string, unknown> | undefined;
           const fromMeta =
             typeof meta?.full_name === "string"
@@ -115,7 +119,7 @@ export function useCommerceIds() {
 
         const ids = comms?.map((c) => c.id) || [];
 
-        if (role === "proprietaire" && online && ids.length > 0) {
+        if (role === "proprietaire" && allowRemoteCommerceBootstrap && ids.length > 0) {
           await ensureOwnerGerantsForProprietaireCommerces(ids, user.id);
         }
 

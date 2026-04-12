@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
+import { readCachedAppRole, readCachedAppRoleStale } from '@/lib/auth/roleCache';
 import { Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -17,7 +18,21 @@ interface Props {
 export default function ProtectedRoute({ allowedRoles }: Props) {
   const { user, role, loading, authReady, signOut } = useAuth();
 
-  if (loading || !authReady) {
+  const effectiveRole =
+    user != null ? role ?? readCachedAppRole(user.id) ?? readCachedAppRoleStale(user.id) : null;
+
+  if (!user) {
+    if (!authReady) {
+      return (
+        <div className="h-screen flex items-center justify-center bg-background">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      );
+    }
+    return <Navigate to="/auth/login" replace />;
+  }
+
+  if (!effectiveRole && loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-background">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -25,11 +40,7 @@ export default function ProtectedRoute({ allowedRoles }: Props) {
     );
   }
 
-  if (!user) {
-    return <Navigate to="/auth/login" replace />;
-  }
-
-  if (!role) {
+  if (!effectiveRole) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 p-6 bg-background text-center">
         <p className="text-lg font-semibold text-foreground">Profil incomplet</p>
@@ -44,15 +55,15 @@ export default function ProtectedRoute({ allowedRoles }: Props) {
   }
 
   if (allowedRoles) {
-    if (!allowedRoles.includes(role)) {
-      if (role === 'super_admin') {
+    if (!allowedRoles.includes(effectiveRole)) {
+      if (effectiveRole === 'super_admin') {
         return <Navigate to="/admin" replace />;
       }
-      if (role === 'admin_staff') {
+      if (effectiveRole === 'admin_staff') {
         return <Navigate to="/admin" replace />;
       }
       // propriétaire / gérant : espace commerçant
-      if (role === 'proprietaire' || role === 'gerant') {
+      if (effectiveRole === 'proprietaire' || effectiveRole === 'gerant') {
         return <Navigate to="/app" replace />;
       }
       return <Navigate to="/auth/login" replace />;

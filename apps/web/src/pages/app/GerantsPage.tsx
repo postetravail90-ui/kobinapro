@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, Users, Loader2, Eye, EyeOff } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
+import { SmartLoader } from '@/components/ui/SmartLoader';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -39,7 +40,7 @@ export default function GerantsPage() {
   const [form, setForm] = useState({ nom: '', email: '', numero: '', password: '', commerce_id: '' });
   const [selectedGerant, setSelectedGerant] = useState<Gerant | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
-  const [skeletonCap, setSkeletonCap] = useState(false);
+  const [hasHydratedData, setHasHydratedData] = useState(false);
   const addLock = useRef(false);
 
   const isOwner = role === 'proprietaire' || role === 'super_admin';
@@ -50,15 +51,19 @@ export default function GerantsPage() {
     return gerants.filter((g) => g.user_id !== user.id);
   }, [gerants, isOwner, user]);
 
-  useEffect(() => {
-    const t = setTimeout(() => setSkeletonCap(true), 3000);
-    return () => clearTimeout(t);
-  }, []);
-
-  const cacheKey = user ? `gerants_page_${user.id}` : '';
+  const cacheKey = user ? `gerants:${user.id}` : '';
+  const legacyGerantsKey = user ? `gerants_page_${user.id}` : '';
 
   const load = useCallback(async () => {
     if (!user || !cacheKey) return;
+    const stale0 =
+      cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(cacheKey) ??
+      cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(legacyGerantsKey);
+    if (stale0) {
+      setCommerces(stale0.commerces);
+      setGerants(stale0.gerants);
+      setHasHydratedData(true);
+    }
     try {
       const { data: comms, error: e0 } = await supabase.from('commerces').select('id, nom').eq('proprietaire_id', user.id);
       if (e0) throw e0;
@@ -97,38 +102,37 @@ export default function GerantsPage() {
         }));
         setGerants(next);
         cacheSet(cacheKey, { commerces: commercesList, gerants: next }, 86_400);
+        cacheSet(legacyGerantsKey, { commerces: commercesList, gerants: next }, 86_400);
       } else {
         setGerants([]);
         cacheSet(cacheKey, { commerces: commercesList, gerants: [] }, 86_400);
+        cacheSet(legacyGerantsKey, { commerces: commercesList, gerants: [] }, 86_400);
       }
+      setHasHydratedData(true);
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[GerantsPage] load', err);
-      const stale = cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(cacheKey);
+      const stale =
+        cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(cacheKey) ??
+        cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(legacyGerantsKey);
       if (stale) {
         setCommerces(stale.commerces);
         setGerants(stale.gerants);
+        setHasHydratedData(true);
       }
     } finally {
       setLoading(false);
     }
-  }, [user, cacheKey, isOwner]);
+  }, [user, cacheKey, legacyGerantsKey, isOwner]);
 
   useEffect(() => {
     if (!user) {
       setGerants([]);
       setCommerces([]);
+      setHasHydratedData(false);
       setLoading(false);
       return;
     }
-    const key = `gerants_page_${user.id}`;
-    const stale = cacheGetStale<{ commerces: { id: string; nom: string }[]; gerants: Gerant[] }>(key);
-    if (stale) {
-      setCommerces(stale.commerces);
-      setGerants(stale.gerants);
-      setLoading(false);
-    } else {
-      setLoading(true);
-    }
+    setLoading(true);
     void load();
   }, [user, load]);
 
@@ -178,9 +182,12 @@ export default function GerantsPage() {
     if (error) toast.error(error.message); else { toast.success('Gérant supprimé'); load(); }
   };
 
-  if (loading && !skeletonCap) return <div className="p-4"><SkeletonList count={3} /></div>;
-
   return (
+    <SmartLoader
+      loading={loading}
+      hasData={hasHydratedData}
+      skeleton={<div className="p-4"><SkeletonList count={3} /></div>}
+    >
     <div className="p-4 space-y-4 max-w-4xl mx-auto pb-32">
       <BackButton fallback="/app" />
       <div className="flex items-center justify-between">
@@ -271,5 +278,6 @@ export default function GerantsPage() {
         />
       )}
     </div>
+    </SmartLoader>
   );
 }

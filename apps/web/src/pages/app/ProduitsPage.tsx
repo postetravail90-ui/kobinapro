@@ -117,7 +117,9 @@ export default function ProduitsPage() {
       return;
     }
     if (commerceIds.length === 0) {
-      toast.error('Connexion requise pour synchroniser votre commerce, ou patientez quelques secondes.');
+      toast.error(
+        'Aucun commerce n’est chargé pour votre compte. Ouvrez la page Commerces, vérifiez votre connexion, ou attendez la fin du chargement puis réessayez.'
+      );
       return;
     }
     const nom = form.nom.trim();

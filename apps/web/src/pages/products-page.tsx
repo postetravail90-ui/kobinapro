@@ -40,8 +40,8 @@ export function ProductsPage(): JSX.Element {
           </Button>
         </div>
       </Card>
-      {products.isLoading ? <Card>Chargement...</Card> : null}
-      {products.isError ? <Card>Erreur de chargement.</Card> : null}
+      {products.isPending && !(products.data?.length) ? <Card>Chargement...</Card> : null}
+      {products.isError && !(products.data?.length) ? <Card>Aucune donnée disponible pour le moment.</Card> : null}
       {(products.data ?? []).map((p) => (
         <Card key={p.id}>
           {p.name} - {p.price.toLocaleString()} XOF

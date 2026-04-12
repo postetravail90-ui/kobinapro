@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { Capacitor } from "@capacitor/core";
 import { getDb } from "@/lib/db";
 import { enqueue } from "@/lib/sync/queue";
 import { ensureBusinessLocalId } from "./business";
@@ -6,7 +7,9 @@ import type { CreateExpenseInput, Expense } from "./types";
 
 async function hydrateExpenses(commerceServerIds: string[]): Promise<void> {
   if (commerceServerIds.length === 0) return;
-  if (typeof navigator !== "undefined" && !navigator.onLine) return;
+  const blockByNavigatorOffline =
+    Capacitor.isNativePlatform() && typeof navigator !== "undefined" && !navigator.onLine;
+  if (blockByNavigatorOffline) return;
 
   const { data, error } = await supabase
     .from("depenses")

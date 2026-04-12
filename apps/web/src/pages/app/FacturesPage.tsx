@@ -12,6 +12,7 @@ import { printReceipt, type ReceiptData } from '@/lib/receipt-utils';
 import { toast } from 'sonner';
 import BackButton from '@/components/BackButton';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
+import { getOfflineSales } from '@/lib/offline-db';
 
 interface Facture {
   id: string;
@@ -21,6 +22,29 @@ interface Facture {
   created_at: string;
   session_id: string;
   vendeur_nom?: string;
+  _offline?: boolean;
+}
+
+function offlineSalesToFactures(sales: Record<string, unknown>[]): Facture[] {
+  return sales.map((s) => ({
+    id: String(s.id ?? ''),
+    total_final: Number(s.total ?? 0),
+    mode_paiement: String(s.mode ?? 'cash'),
+    statut: String(s.mode) === 'credit' ? 'credit' : 'payee',
+    created_at: String(s.created_at ?? new Date().toISOString()),
+    session_id: `offline:${String(s.id ?? '')}`,
+    vendeur_nom: String(s.user_name ?? ''),
+    _offline: true,
+  }));
+}
+
+async function mergeFacturesWithOffline(server: Facture[]): Promise<Facture[]> {
+  const offline = await getOfflineSales();
+  const offRows = offlineSalesToFactures(offline);
+  const seen = new Set(server.map((f) => f.id));
+  const merged = [...offRows.filter((f) => !seen.has(f.id)), ...server];
+  merged.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  return merged;
 }
 
 export default function FacturesPage() {
@@ -42,10 +66,12 @@ export default function FacturesPage() {
   const fetchFactures = useCallback(async () => {
     if (!user || !facturesCacheKey || commerceLoading) return;
     const ids = [...commerceIds];
+    const ventesKey = ids.length ? `ventes:${ids.slice().sort().join(',')}` : '';
     try {
       if (ids.length === 0) {
-        setFactures([]);
-        cacheSet(facturesCacheKey, [], 86_400);
+        const offlineOnly = await mergeFacturesWithOffline([]);
+        setFactures(offlineOnly);
+        cacheSet(facturesCacheKey, offlineOnly, 86_400);
         return;
       }
 
@@ -57,8 +83,10 @@ export default function FacturesPage() {
 
       const sIds = sessions?.map((s) => s.id) || [];
       if (sIds.length === 0) {
-        setFactures([]);
-        cacheSet(facturesCacheKey, [], 86_400);
+        const offlineOnly = await mergeFacturesWithOffline([]);
+        setFactures(offlineOnly);
+        cacheSet(facturesCacheKey, offlineOnly, 86_400);
+        if (ventesKey) cacheSet(ventesKey, offlineOnly, 86_400);
         return;
       }
 
@@ -90,12 +118,16 @@ export default function FacturesPage() {
         ...(f as Facture),
         vendeur_nom: gerantProfileMap[sessionGerantMap.get(f.session_id) || ''] || undefined
       }));
-      setFactures(mapped);
-      cacheSet(facturesCacheKey, mapped, 86_400);
+      const merged = await mergeFacturesWithOffline(mapped);
+      setFactures(merged);
+      cacheSet(facturesCacheKey, merged, 86_400);
+      if (ventesKey) cacheSet(ventesKey, merged, 86_400);
     } catch (err) {
       if (import.meta.env.DEV) console.warn('[FacturesPage]', err);
-      const stale = cacheGetStale<Facture[]>(facturesCacheKey);
-      if (stale) setFactures(stale);
+      const stale =
+        (ventesKey && cacheGetStale<Facture[]>(ventesKey)) ||
+        cacheGetStale<Facture[]>(facturesCacheKey);
+      if (stale?.length) setFactures(stale);
     } finally {
       setLoading(false);
     }
@@ -107,7 +139,11 @@ export default function FacturesPage() {
       setLoading(false);
       return;
     }
-    const stale = cacheGetStale<Facture[]>(facturesCacheKey);
+    const idsStr = [...commerceIds].sort().join(',');
+    const ventesKey = idsStr ? `ventes:${idsStr}` : '';
+    const stale =
+      (ventesKey && cacheGetStale<Facture[]>(ventesKey)) ||
+      cacheGetStale<Facture[]>(facturesCacheKey);
     if (stale?.length) {
       setFactures(stale);
     }
@@ -120,6 +156,36 @@ export default function FacturesPage() {
   }, [user, facturesCacheKey, commerceLoading, fetchFactures]);
 
   const loadReceiptData = async (f: Facture) => {
+    if (f._offline) {
+      const sales = await getOfflineSales();
+      const sale = sales.find((s) => String(s.id) === f.id);
+      const rawItems = (sale?.items as Array<Record<string, unknown>> | undefined) ?? [];
+      const items: ReceiptData['items'] = rawItems.map((it) => ({
+        nom: String(it.produit_nom ?? it.nom ?? 'Produit'),
+        quantite: Number(it.quantite ?? 0),
+        prixUnitaire: Number(it.prix_unitaire ?? 0),
+        totalLigne: Number(it.prix_unitaire ?? 0) * Number(it.quantite ?? 0),
+      }));
+      const commerceName =
+        commerces.find((c) => c.id === String(sale?.commerce_id ?? ''))?.nom || 'Commerce';
+      const paid =
+        sale?.mode === 'credit' && sale?.partial_amount != null
+          ? Number(sale.partial_amount)
+          : Number(f.total_final);
+      return {
+        id: f.id,
+        commerceName,
+        date: f.created_at,
+        vendeur: f.vendeur_nom || user?.email || 'Vendeur',
+        type: f.mode_paiement,
+        items,
+        sousTotal: Number(f.total_final),
+        totalFinal: Number(f.total_final),
+        montantPaye: paid,
+        reste: Math.max(0, Number(f.total_final) - paid),
+      } satisfies ReceiptData;
+    }
+
     const { data: session } = await supabase
       .from('sessions')
       .select('commerce_id, gerant_id')

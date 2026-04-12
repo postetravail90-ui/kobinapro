@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/hooks/useSubscription';
+import { useOnlineStatus } from '@/hooks/useOnlineStatus';
+import { offlineQueue } from '@/lib/offline-queue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, Store, MapPin, Loader2, Trash2, Image as ImageIcon } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
+import { SmartLoader } from '@/components/ui/SmartLoader';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
@@ -29,19 +32,23 @@ interface Commerce {
 export default function CommercesPage() {
   const { user } = useAuth();
   const sub = useSubscription();
+  const isOnline = useOnlineStatus();
   const [commerces, setCommerces] = useState<Commerce[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasListData, setHasListData] = useState(false);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ nom: '', type: 'boutique', adresse: '' });
 
   const load = useCallback(async (opts?: { silent?: boolean }) => {
     if (!user) return;
-    const cacheKey = `commerces_list_${user.id}`;
-    const stale = cacheGetStale<Commerce[]>(cacheKey);
-    if (stale?.length && !opts?.silent) {
+    const cacheKey = `commerces:${user.id}`;
+    const legacyKey = `commerces_list_${user.id}`;
+    const stale = cacheGetStale<Commerce[]>(cacheKey) ?? cacheGetStale<Commerce[]>(legacyKey);
+    if (stale?.length) {
       setCommerces(stale);
-      setLoading(false);
+      setHasListData(true);
+      if (!opts?.silent) setLoading(false);
     }
 
     const { data, error } = await supabase
@@ -51,21 +58,29 @@ export default function CommercesPage() {
       .order('created_at', { ascending: false });
 
     if (error) {
-      console.error('[CommercesPage] load', error);
-      if (stale?.length) setCommerces(stale);
-      else setCommerces([]);
+      if (import.meta.env.DEV) console.warn('[CommercesPage] load', error);
+      const again = cacheGetStale<Commerce[]>(cacheKey) ?? cacheGetStale<Commerce[]>(legacyKey);
+      if (again?.length) {
+        setCommerces(again);
+        setHasListData(true);
+      } else if (!stale?.length) {
+        setCommerces([]);
+      }
       setLoading(false);
       return;
     }
     const rows = data ?? [];
     setCommerces(rows);
     cacheSet(cacheKey, rows, 86_400);
+    cacheSet(legacyKey, rows, 86_400);
+    setHasListData(rows.length > 0);
     setLoading(false);
   }, [user]);
 
   useEffect(() => {
     if (!user) {
       setCommerces([]);
+      setHasListData(false);
       setLoading(false);
       return;
     }
@@ -85,6 +100,42 @@ export default function CommercesPage() {
     }
 
     setSaving(true);
+
+    if (!isOnline) {
+      const tempId = crypto.randomUUID();
+      const row: Commerce = {
+        id: tempId,
+        nom: form.nom.trim(),
+        type: form.type,
+        adresse: form.adresse.trim() || null,
+        statut: 'actif',
+        created_at: new Date().toISOString(),
+      };
+      offlineQueue.add({
+        type: 'commerce_insert',
+        payload: {
+          nom: row.nom,
+          type: form.type as Database['public']['Enums']['commerce_type'],
+          adresse: row.adresse,
+          proprietaire_id: user.id,
+          statut: 'actif',
+        },
+      });
+      setCommerces((prev) => {
+        const merged = [row, ...prev.filter((c) => c.id !== row.id)];
+        cacheSet(`commerces:${user.id}`, merged, 86_400);
+        cacheSet(`commerces_list_${user.id}`, merged, 86_400);
+        return merged;
+      });
+      toast.message('Hors ligne', {
+        description: 'Commerce enregistré localement — sera synchronisé à la reconnexion.',
+      });
+      setSaving(false);
+      setOpen(false);
+      setForm({ nom: '', type: 'boutique', adresse: '' });
+      return;
+    }
+
     const { data: inserted, error } = await supabase
       .from('commerces')
       .insert({
@@ -122,13 +173,29 @@ export default function CommercesPage() {
 
   const handleDelete = async (id: string) => {
     if (!confirm('Supprimer ce commerce ?')) return;
+    if (!isOnline) {
+      offlineQueue.add({ type: 'commerce_delete', payload: { id } });
+      setCommerces((prev) => {
+        const next = prev.filter((c) => c.id !== id);
+        if (user) {
+          cacheSet(`commerces:${user.id}`, next, 86_400);
+          cacheSet(`commerces_list_${user.id}`, next, 86_400);
+        }
+        return next;
+      });
+      toast.message('Hors ligne', { description: 'Suppression enregistrée — synchronisation à la reconnexion.' });
+      return;
+    }
     const { error } = await supabase.from('commerces').delete().eq('id', id);
     if (error) toast.error(error.message); else { toast.success('Commerce supprimé'); load(); sub.refresh(); }
   };
 
-  if (loading) return <div className="p-4"><SkeletonList count={3} /></div>;
-
   return (
+    <SmartLoader
+      loading={loading}
+      hasData={hasListData}
+      skeleton={<div className="p-4"><SkeletonList count={3} /></div>}
+    >
     <div className="p-4 space-y-4 max-w-4xl mx-auto pb-32">
       <BackButton fallback="/app" />
       <div className="flex items-center justify-between">
@@ -219,5 +286,6 @@ export default function CommercesPage() {
         </div>
       )}
     </div>
+    </SmartLoader>
   );
 }

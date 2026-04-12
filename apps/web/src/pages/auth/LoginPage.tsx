@@ -15,6 +15,7 @@ import { isAccountSuspended } from '@/lib/account-suspended';
 import { assertNavigatorOnlineOrThrow, toAuthUiError } from '@/lib/auth-errors';
 import { withUiTimeout } from '@/lib/async-timeout';
 import { LOGIN_FLOW_MAX_MS, SIGN_IN_MAX_MS, ROLE_RESOLVE_MAX_MS } from '@/lib/network-timeouts';
+import { writeLocalUserProfile } from '@/lib/auth/localUserProfileCache';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -82,6 +83,7 @@ export default function LoginPage() {
           }
 
           if (!data.user) return;
+          writeLocalUserProfile(data.user);
 
           const suspended = await withUiTimeout(
             isAccountSuspended(data.user.id),

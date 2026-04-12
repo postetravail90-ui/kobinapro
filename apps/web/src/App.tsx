@@ -5,6 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from '@/contexts/AuthContext';
+import { useNetworkSync } from '@/hooks/useNetworkSync';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import SplashScreen from '@/components/SplashScreen';
 
@@ -125,6 +126,68 @@ const Loading = React.forwardRef<HTMLDivElement>((_, ref) => (
 ));
 Loading.displayName = 'Loading';
 
+function AppRoutes() {
+  useNetworkSync();
+  return (
+    <Suspense fallback={<Loading />}>
+      <Routes>
+        {/* Public */}
+        <Route path="/" element={<LandingPage />} />
+        <Route path="/login" element={<Navigate to="/auth/login" replace />} />
+        <Route path="/auth/login" element={<LoginPage />} />
+        <Route path="/auth/register" element={<RegisterPage />} />
+        <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/payment-success" element={<PaymentSuccessPage />} />
+
+        {/* App - Protected */}
+        <Route element={<ProtectedRoute allowedRoles={['proprietaire', 'gerant', 'super_admin']} />}>
+          <Route element={<AppLayout />}>
+            <Route path="/app" element={<DashboardRouter />} />
+            <Route path="/app/commerces" element={<CommercesPage />} />
+            <Route path="/app/produits" element={<ProduitsPage />} />
+            <Route path="/app/gerants" element={<GerantsPage />} />
+            <Route path="/app/sessions" element={<SessionsPage />} />
+            <Route path="/app/caisse" element={<SessionsPage />} />
+            <Route path="/app/factures" element={<FacturesPage />} />
+            <Route path="/app/credits" element={<CreditsPage />} />
+            <Route path="/app/depenses" element={<DepensesPage />} />
+            <Route path="/app/parrainage" element={<ParrainagePage />} />
+            <Route path="/app/abonnements" element={<AbonnementsPage />} />
+            <Route path="/app/parametres" element={<ParametresPage />} />
+            <Route path="/app/notifications" element={<NotificationsPage />} />
+            <Route path="/app/notifications/settings" element={<NotificationSettingsPage />} />
+            <Route path="/app/messages" element={<MessagesPage />} />
+            <Route path="/app/benefice" element={<BeneficePage />} />
+            <Route path="/app/fidelite" element={<FidelitePage />} />
+          </Route>
+        </Route>
+
+        {/* Admin - Protected */}
+        <Route element={<ProtectedRoute allowedRoles={['super_admin', 'admin_staff']} />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+            <Route path="/admin/team" element={<AdminTeamPage />} />
+            <Route path="/admin/users" element={<AdminUsersPage />} />
+            <Route path="/admin/commerces" element={<AdminCommercesPage />} />
+            <Route path="/admin/monitoring" element={<MonitoringPage />} />
+            <Route path="/admin/fraude" element={<FraudePage />} />
+            <Route path="/admin/abonnements" element={<AdminAbonnementsPage />} />
+            <Route path="/admin/analytics" element={<AnalyticsPage />} />
+            <Route path="/admin/revenue" element={<AdminRevenuePage />} />
+            <Route path="/admin/security" element={<AdminSecurityPage />} />
+            <Route path="/admin/logs" element={<AdminLogsPage />} />
+            <Route path="/admin/settings" element={<AdminSettingsPage />} />
+            <Route path="/admin/support" element={<AdminSupportPage />} />
+          </Route>
+        </Route>
+
+        <Route path="*" element={<NotFound />} />
+      </Routes>
+    </Suspense>
+  );
+}
+
 const App = () => {
   const [showSplash, setShowSplash] = useState(() => {
     const seen = sessionStorage.getItem('splash_seen');
@@ -151,62 +214,7 @@ const App = () => {
         <SplashScreen show={showSplash} />
         <BrowserRouter>
           <AuthProvider>
-            <Suspense fallback={<Loading />}>
-              <Routes>
-                {/* Public */}
-                <Route path="/" element={<LandingPage />} />
-                <Route path="/login" element={<Navigate to="/auth/login" replace />} />
-                <Route path="/auth/login" element={<LoginPage />} />
-                <Route path="/auth/register" element={<RegisterPage />} />
-                <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
-                <Route path="/reset-password" element={<ResetPasswordPage />} />
-                <Route path="/payment-success" element={<PaymentSuccessPage />} />
-
-                {/* App - Protected */}
-                <Route element={<ProtectedRoute allowedRoles={['proprietaire', 'gerant', 'super_admin']} />}>
-                  <Route element={<AppLayout />}>
-                    <Route path="/app" element={<DashboardRouter />} />
-                    <Route path="/app/commerces" element={<CommercesPage />} />
-                    <Route path="/app/produits" element={<ProduitsPage />} />
-                    <Route path="/app/gerants" element={<GerantsPage />} />
-                    <Route path="/app/sessions" element={<SessionsPage />} />
-                    <Route path="/app/caisse" element={<SessionsPage />} />
-                    <Route path="/app/factures" element={<FacturesPage />} />
-                    <Route path="/app/credits" element={<CreditsPage />} />
-                    <Route path="/app/depenses" element={<DepensesPage />} />
-                    <Route path="/app/parrainage" element={<ParrainagePage />} />
-                    <Route path="/app/abonnements" element={<AbonnementsPage />} />
-                    <Route path="/app/parametres" element={<ParametresPage />} />
-                    <Route path="/app/notifications" element={<NotificationsPage />} />
-                    <Route path="/app/notifications/settings" element={<NotificationSettingsPage />} />
-                    <Route path="/app/messages" element={<MessagesPage />} />
-                    <Route path="/app/benefice" element={<BeneficePage />} />
-                    <Route path="/app/fidelite" element={<FidelitePage />} />
-                  </Route>
-                </Route>
-
-                {/* Admin - Protected */}
-                <Route element={<ProtectedRoute allowedRoles={['super_admin', 'admin_staff']} />}>
-                  <Route element={<AdminLayout />}>
-                    <Route path="/admin" element={<AdminDashboard />} />
-                    <Route path="/admin/team" element={<AdminTeamPage />} />
-                    <Route path="/admin/users" element={<AdminUsersPage />} />
-                    <Route path="/admin/commerces" element={<AdminCommercesPage />} />
-                    <Route path="/admin/monitoring" element={<MonitoringPage />} />
-                    <Route path="/admin/fraude" element={<FraudePage />} />
-                    <Route path="/admin/abonnements" element={<AdminAbonnementsPage />} />
-                    <Route path="/admin/analytics" element={<AnalyticsPage />} />
-                    <Route path="/admin/revenue" element={<AdminRevenuePage />} />
-                    <Route path="/admin/security" element={<AdminSecurityPage />} />
-                    <Route path="/admin/logs" element={<AdminLogsPage />} />
-                    <Route path="/admin/settings" element={<AdminSettingsPage />} />
-                    <Route path="/admin/support" element={<AdminSupportPage />} />
-                  </Route>
-                </Route>
-
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </Suspense>
+            <AppRoutes />
           </AuthProvider>
         </BrowserRouter>
       </TooltipProvider>

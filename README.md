@@ -17,7 +17,9 @@ cp apps/web/.env.example apps/web/.env
 pnpm dev
 ```
 
-Le serveur de dev est lancé par le workspace `@kobina/web`.
+Le serveur de dev est lancé par le workspace `@kobina/web` (souvent **http://localhost:8080**).
+
+**Inscription / sauvegardes en local** : configurer Supabase (URLs de redirection, e‑mail, RLS). Guide pas à pas : **`docs/TESTER_EN_LOCAL.md`**.
 
 ## Qualité avant release
 
@@ -25,9 +27,9 @@ Le serveur de dev est lancé par le workspace `@kobina/web`.
 pnpm validate
 ```
 
-Enchaîne : **`typecheck:libs`** (`@kobina/core`, `db`, `sync`, `ui`, `mobile`) → **`tsc` web** → **tests** → **build** du web.
+Enchaîne : **`typecheck:libs`** → **typecheck web** → **`lint:web`** → **tests web** → **build web** (voir `package.json` racine).
 
-Style / dette ESLint : `pnpm lint:web` (la **CI** le lance en **non bloquant** tant que le legacy `any` / hooks est nettoyé).
+À part : `pnpm lint:web` seul pour itérer sur le style ESLint.
 
 ## Build production (web)
 
@@ -37,32 +39,35 @@ pnpm build
 
 Sortie : `apps/web/dist/`.
 
-## Android (Capacitor)
+## Android (Capacitor + Android Studio)
 
 Le projet Gradle est sous **`apps/mobile/android`** (versionné dans ce dépôt).
 
-1. Builder le front et synchroniser les assets :
+1. **Configurer le web** : `apps/web/.env` (voir `.env.example`) — nécessaire pour un build qui pointe vers votre Supabase.
+2. **Build web + copie dans Android** :
 
 ```bash
 pnpm mobile:sync
 ```
 
-2. Ouvrir Android Studio :
+3. **Android Studio** : *File → Open* → sélectionner le dossier **`apps/mobile/android`** (pas `apps/web`). JDK **17**, SDK **API 34**. Guide pas à pas : **`apps/mobile/README.md`**.
+
+4. Ou ouvrir le module depuis le terminal :
 
 ```bash
 pnpm mobile:open
 ```
 
-3. Dans Android Studio : choisir un appareil / émulateur → **Run**.
+5. Choisir un émulateur ou un téléphone → **Run** (variante **debug**).
 
-Pour les **notifications Firebase**, place `google-services.json` dans `apps/mobile/android/app/` (fichier ignoré par Git dans le sous-projet Android ; ne pas commiter sur un dépôt public).
+**Firebase / FCM** : placer `google-services.json` dans `apps/mobile/android/app/` (ignoré par Git — ne pas publier sur un dépôt public).
 
 ## Workspaces
 
 | Dossier | Rôle |
 |---------|------|
 | `apps/web` | PWA / app principale React |
-| `apps/mobile` | Wrapper Capacitor (`webDir` → `../web/dist`) |
+| `apps/mobile` | Wrapper Capacitor (`webDir` → `../web/dist`) — voir **`apps/mobile/README.md`** pour Android Studio |
 | `apps/desktop` | **Prévu** — emplacement réservé (pas d’app Tauri livrée ici pour l’instant) |
 | `packages/core` | Logique métier partagée |
 | `packages/sync` | Moteur offline / sync |

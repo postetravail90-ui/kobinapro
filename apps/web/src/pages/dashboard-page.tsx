@@ -13,9 +13,6 @@ export function DashboardPage(): JSX.Element {
 
   if (business.isLoading) return <Screen title="Dashboard">Chargement du business...</Screen>;
   if (!businessId) return <Screen title="Dashboard">Aucun business actif.</Screen>;
-  if (products.isError || credits.isError || expenses.isError || salesToday.isError) {
-    return <Screen title="Dashboard">Erreur chargement dashboard.</Screen>;
-  }
 
   return (
     <Screen title="Dashboard" subtitle={business.data?.name}>

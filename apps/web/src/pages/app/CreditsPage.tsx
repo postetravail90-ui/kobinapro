@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCommerceIds } from '@/hooks/useCommerceIds';
 import { getCredits } from '@/lib/data/credits';
@@ -8,6 +8,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { CreditCard, AlertCircle, User, Calendar, Clock, CheckCircle2 } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
+import { SmartLoader } from '@/components/ui/SmartLoader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -15,6 +16,7 @@ import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'framer-motion';
 import BackButton from '@/components/BackButton';
 import { toUiErrorMessage } from '@/lib/ui-errors';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 interface Credit {
   id: string;
@@ -32,31 +34,57 @@ interface Credit {
 
 export default function CreditsPage() {
   const { user } = useAuth();
-  const { commerceIds } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCommerceIds();
   const isOnline = useOnlineStatus();
   const [credits, setCredits] = useState<Credit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasHydratedData, setHasHydratedData] = useState(false);
   const [payingId, setPayingId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [processing, setProcessing] = useState(false);
 
-  const loadCredits = async () => {
-    if (!user) return;
+  const loadCredits = useCallback(async () => {
+    if (!user) {
+      setCredits([]);
+      setLoading(false);
+      setHasHydratedData(false);
+      return;
+    }
+    const idsSorted = [...commerceIds].sort().join(',');
+    const cacheKeyPrimary = `credits:${idsSorted}`;
+    const cacheKeyLegacy = `credits_page_${user.id}_${idsSorted}`;
+    const stale =
+      cacheGetStale<Credit[]>(cacheKeyPrimary) ?? cacheGetStale<Credit[]>(cacheKeyLegacy);
+    if (stale?.length) {
+      setCredits(stale);
+      setHasHydratedData(true);
+    }
+
     try {
       if (commerceIds.length === 0) {
         setCredits([]);
         return;
       }
       const data = await getCredits(commerceIds);
-      setCredits(data as Credit[]);
-    } catch (err: unknown) {
-      toast.error(toUiErrorMessage(err, 'Impossible de charger les credits'));
+      const rows = data as Credit[];
+      setCredits(rows);
+      cacheSet(cacheKeyPrimary, rows, 86_400);
+      cacheSet(cacheKeyLegacy, rows, 86_400);
+    } catch {
+      const again =
+        cacheGetStale<Credit[]>(cacheKeyPrimary) ?? cacheGetStale<Credit[]>(cacheKeyLegacy);
+      if (again?.length) setCredits(again);
+      else setCredits([]);
     } finally {
       setLoading(false);
+      setHasHydratedData(true);
     }
-  };
+  }, [user, commerceIds]);
 
-  useEffect(() => { loadCredits(); }, [user, commerceIds.join(',')]);
+  useEffect(() => {
+    if (commerceLoading) return;
+    void loadCredits();
+  }, [user, commerceIds.join(','), commerceLoading, loadCredits]);
 
   const handlePayCredit = async (creditId: string) => {
     const amount = parseInt(payAmount) || 0;
@@ -94,15 +122,13 @@ export default function CreditsPage() {
       }
       setPayingId(null);
       setPayAmount('');
-      if (isOnline) await loadCredits();
+      if (isOnline) void loadCredits();
     } catch (err: unknown) {
       toast.error(toUiErrorMessage(err, 'Erreur lors du paiement du credit'));
     } finally {
       setProcessing(false);
     }
   };
-
-  if (loading) return <div className="p-4"><SkeletonList /></div>;
 
   const activeCredits = credits.filter(c => c.statut !== 'paye');
   const paidCredits = credits.filter(c => c.statut === 'paye');
@@ -245,6 +271,11 @@ export default function CreditsPage() {
   );
 
   return (
+    <SmartLoader
+      loading={loading || commerceLoading}
+      hasData={hasHydratedData}
+      skeleton={<div className="p-4"><SkeletonList /></div>}
+    >
     <div className="p-4 space-y-4 max-w-4xl mx-auto pb-32">
       <BackButton fallback="/app" />
       <div>
@@ -261,5 +292,6 @@ export default function CreditsPage() {
         <TabsContent value="paid"><CreditList items={paidCredits} /></TabsContent>
       </Tabs>
     </div>
+    </SmartLoader>
   );
 }

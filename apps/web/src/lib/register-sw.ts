@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { processQueue } from './sync-processor';
 
 /** Background Sync API (non standard) */
@@ -6,6 +7,11 @@ interface ServiceWorkerRegistrationWithSync extends ServiceWorkerRegistration {
 }
 
 export function registerServiceWorker() {
+  // Capacitor : le SW peut provoquer écran blanc / cache incohérent avec le WebView (localhost).
+  if (Capacitor.isNativePlatform()) {
+    return;
+  }
+
   // En dev, le SW casse Vite (/@vite/client, HMR, modules). On désinscrit les SW résiduels.
   if (import.meta.env.DEV) {
     if ('serviceWorker' in navigator) {

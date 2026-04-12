@@ -11,6 +11,7 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useManagerPermissions } from '@/hooks/useManagerPermissions';
 import { StatCard } from '@/components/ui/stat-card';
 import { SkeletonGrid } from '@/components/ui/skeleton-card';
+import { SmartLoader } from '@/components/ui/SmartLoader';
 import { motion } from 'framer-motion';
 import { Link, useNavigate } from 'react-router-dom';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
@@ -25,6 +26,11 @@ interface ManagerStats {
   produitsFaibles: number;
   sessionsOuvertes: number;
   montantAVerser: number;
+}
+
+interface ManagerDashboardSnapshot {
+  stats: ManagerStats;
+  profile: { nom: string } | null;
 }
 
 export default function ManagerDashboardPage() {
@@ -42,7 +48,7 @@ export default function ManagerDashboardPage() {
     depensesJour: 0, depensesCount: 0, produitsFaibles: 0, sessionsOuvertes: 0,
     montantAVerser: 0,
   });
-  const [skeletonCap, setSkeletonCap] = useState(false);
+  const [hasHydratedData, setHasHydratedData] = useState(false);
 
   const commerceName = commerces[0]?.nom || 'Commerce';
   const today = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -50,20 +56,48 @@ export default function ManagerDashboardPage() {
   const greeting = now.getHours() < 12 ? 'Bonjour' : now.getHours() < 18 ? 'Bon après-midi' : 'Bonsoir';
 
   useEffect(() => {
-    const t = setTimeout(() => setSkeletonCap(true), 3000);
-    return () => clearTimeout(t);
-  }, []);
-
-  useEffect(() => {
     if (!user) return;
     const st = cacheGetStale<ManagerStats>(`manager_dashboard_${user.id}`);
     const pr = cacheGetStale<{ nom: string }>(`manager_profile_${user.id}`);
-    if (st) setStats(st);
-    if (pr) setProfile(pr);
+    let any = false;
+    if (st) {
+      setStats(st);
+      any = true;
+    }
+    if (pr) {
+      setProfile(pr);
+      any = true;
+    }
+    if (any) setHasHydratedData(true);
   }, [user?.id]);
 
   const load = useCallback(async () => {
-    if (!user || commerceIds.length === 0) { setLoading(false); return; }
+    if (!user || commerceIds.length === 0) {
+      setLoading(false);
+      return;
+    }
+
+    const bundle = cacheGetStale<ManagerDashboardSnapshot>(`manager-dashboard:${user.id}`);
+    let fromStale = false;
+    if (bundle?.stats) {
+      setStats(bundle.stats);
+      fromStale = true;
+    }
+    if (bundle?.profile) {
+      setProfile(bundle.profile);
+      fromStale = true;
+    }
+    const st0 = cacheGetStale<ManagerStats>(`manager_dashboard_${user.id}`);
+    const pr0 = cacheGetStale<{ nom: string }>(`manager_profile_${user.id}`);
+    if (!bundle?.stats && st0) {
+      setStats(st0);
+      fromStale = true;
+    }
+    if (!bundle?.profile && pr0) {
+      setProfile(pr0);
+      fromStale = true;
+    }
+    if (fromStale) setHasHydratedData(true);
 
     try {
       const [profileRes, salesRes, creditsRes, depensesRes, sessionsRes] = await Promise.all([
@@ -99,13 +133,23 @@ export default function ManagerDashboardPage() {
       if (user) {
         cacheSet(`manager_dashboard_${user.id}`, next, 86_400);
         if (profileRes.data) cacheSet(`manager_profile_${user.id}`, profileRes.data, 86_400);
+        cacheSet(
+          `manager-dashboard:${user.id}`,
+          { stats: next, profile: profileRes.data ?? null },
+          86_400
+        );
       }
+      setHasHydratedData(true);
     } catch {
       if (user) {
+        const b = cacheGetStale<ManagerDashboardSnapshot>(`manager-dashboard:${user.id}`);
+        if (b?.stats) setStats(b.stats);
+        if (b?.profile) setProfile(b.profile);
         const st = cacheGetStale<ManagerStats>(`manager_dashboard_${user.id}`);
         const pr = cacheGetStale<{ nom: string }>(`manager_profile_${user.id}`);
-        if (st) setStats(st);
-        if (pr) setProfile(pr);
+        if (!b?.stats && st) setStats(st);
+        if (!b?.profile && pr) setProfile(pr);
+        if (b?.stats || b?.profile || st || pr) setHasHydratedData(true);
       }
     }
     setLoading(false);
@@ -116,16 +160,17 @@ export default function ManagerDashboardPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [commerceLoading, commerceIds.length]);
 
-  if ((loading || commerceLoading) && !skeletonCap) {
-    return (
-      <div className="p-4 space-y-4">
-        <div className="h-8 w-48 skeleton-shimmer rounded-lg" />
-        <SkeletonGrid count={4} />
-      </div>
-    );
-  }
-
   return (
+    <SmartLoader
+      loading={loading || commerceLoading}
+      hasData={hasHydratedData}
+      skeleton={
+        <div className="p-4 space-y-4">
+          <div className="h-8 w-48 skeleton-shimmer rounded-lg" />
+          <SkeletonGrid count={4} />
+        </div>
+      }
+    >
     <div className="p-4 space-y-5 max-w-3xl mx-auto pb-32">
       {/* Welcome */}
       <div>
@@ -247,5 +292,6 @@ export default function ManagerDashboardPage() {
         )}
       </div>
     </div>
+    </SmartLoader>
   );
 }

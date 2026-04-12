@@ -15,6 +15,12 @@ const config: CapacitorConfig = {
   server: {
     androidScheme: "https"
   },
+  android: {
+    allowMixedContent: false,
+    captureInput: true,
+    /** `true` : Chrome → chrome://inspect → console JS (404, erreurs). Remettre `false` pour une build release. */
+    webContentsDebuggingEnabled: true
+  },
   plugins: {
     CapacitorSQLite: {
       iosDatabaseLocation: "Library/CapacitorDatabase",

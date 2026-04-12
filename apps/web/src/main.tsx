@@ -11,30 +11,38 @@ import { useSyncStore } from "@/store/syncStore";
 
 registerServiceWorker();
 
-void initLocalDB()
-  .catch((e) => {
-    console.error("[Kobina] initLocalDB :", e);
-  })
-  .then(() =>
-    initLocalDataLayer().catch((e) => {
-      console.error("[Kobina] initLocalDataLayer a échoué — démarrage de l’app quand même :", e);
-    })
-  )
-  .then(async () => {
-    startNetworkWatcher(
-      () => {
-        useSyncStore.getState().setOnline(true);
-        triggerSyncFlush();
-      },
-      () => useSyncStore.getState().setOnline(false)
-    );
-    await useSyncStore.getState().refreshPendingCount();
-    await useSyncStore.getState().refreshSyncErrors();
+const rootEl = document.getElementById("root");
+if (!rootEl) {
+  throw new Error("[Kobina] Élément #root introuvable dans index.html");
+}
 
-    createRoot(document.getElementById("root")!).render(
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
-    );
-    startOfflineFirstSyncEngine();
-  });
+createRoot(rootEl).render(
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+/** Initialisation hors-ligne après le premier rendu — évite un écran blanc si sql.js / WASM est lent ou bloqué. */
+void (async () => {
+  try {
+    await initLocalDB().catch((e) => {
+      console.error("[Kobina] initLocalDB :", e);
+    });
+    await initLocalDataLayer().catch((e) => {
+      console.error("[Kobina] initLocalDataLayer a échoué — poursuite :", e);
+    });
+  } catch (e) {
+    console.error("[Kobina] bootstrap local :", e);
+  }
+
+  startNetworkWatcher(
+    () => {
+      useSyncStore.getState().setOnline(true);
+      triggerSyncFlush();
+    },
+    () => useSyncStore.getState().setOnline(false)
+  );
+  await useSyncStore.getState().refreshPendingCount();
+  await useSyncStore.getState().refreshSyncErrors();
+  startOfflineFirstSyncEngine();
+})();

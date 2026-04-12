@@ -43,8 +43,8 @@ export function CreditsPage(): JSX.Element {
           </Button>
         </div>
       </Card>
-      {credits.isLoading ? <Card>Chargement...</Card> : null}
-      {credits.isError ? <Card>Erreur de chargement.</Card> : null}
+      {credits.isPending && !(credits.data?.length) ? <Card>Chargement...</Card> : null}
+      {credits.isError && !(credits.data?.length) ? <Card>Aucune donnée disponible pour le moment.</Card> : null}
       {(credits.data ?? []).map((c) => (
         <Card key={c.id}>
           {c.client_name} - {(c.total_amount - c.paid_amount).toLocaleString()} XOF ({c.status})

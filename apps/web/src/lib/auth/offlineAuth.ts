@@ -1,6 +1,8 @@
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { writeLocalUserProfile, clearLocalUserProfile } from "@/lib/auth/localUserProfileCache";
 import type { AppRole } from "@/lib/auth-role";
+import type { SessionVaultPayload } from "./sessionVault";
 import * as vault from "./sessionVault";
 
 export interface OfflineBootResult {
@@ -15,7 +17,7 @@ export interface OfflineBootResult {
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
-function minimalUser(v: vault.SessionVaultPayload): User {
+export function minimalUserFromVault(v: SessionVaultPayload): User {
   return {
     id: v.user_id,
     aud: "authenticated",
@@ -29,7 +31,7 @@ function minimalUser(v: vault.SessionVaultPayload): User {
   } as User;
 }
 
-function syntheticSession(v: vault.SessionVaultPayload, user: User): Session {
+export function syntheticSessionFromVault(v: SessionVaultPayload, user: User): Session {
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = typeof v.expires_at === "number" ? v.expires_at : nowSec + 3600;
   return {
@@ -51,7 +53,7 @@ export async function bootSession(): Promise<OfflineBootResult | null> {
     return null;
   }
 
-  const user = minimalUser(raw);
+  const user = minimalUserFromVault(raw);
   const online = typeof navigator !== "undefined" && navigator.onLine;
   const nowSec = Math.floor(Date.now() / 1000);
 
@@ -73,7 +75,7 @@ export async function bootSession(): Promise<OfflineBootResult | null> {
   }
 
   if (raw.expires_at > nowSec) {
-    const session = syntheticSession(raw, user);
+    const session = syntheticSessionFromVault(raw, user);
     return {
       session,
       user,
@@ -84,7 +86,7 @@ export async function bootSession(): Promise<OfflineBootResult | null> {
   }
 
   const softOk = Date.now() - raw.last_online_at <= THIRTY_DAYS_MS;
-  const session = syntheticSession(raw, user);
+  const session = syntheticSessionFromVault(raw, user);
   return {
     session,
     user,
@@ -111,9 +113,12 @@ export async function persistSession(session: Session, user: User, role: AppRole
     role: role ?? null,
     last_online_at: Date.now()
   });
+  writeLocalUserProfile(user);
 }
 
 export async function clearSession(): Promise<void> {
+  const v = await vault.readVault();
+  if (v?.user_id) clearLocalUserProfile(v.user_id);
   await vault.clearVault();
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useCommerceIds } from '@/hooks/useCommerceIds';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
@@ -13,10 +13,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Plus, Wallet, Loader2, WifiOff, User as UserIcon, Clock } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
+import { SmartLoader } from '@/components/ui/SmartLoader';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import BackButton from '@/components/BackButton';
 import { toUiErrorMessage } from '@/lib/ui-errors';
+import { cacheGetStale, cacheSet } from '@/lib/cache';
 
 interface Depense {
   id: string;
@@ -36,12 +38,35 @@ export default function DepensesPage() {
   const isOnline = useOnlineStatus();
   const [depenses, setDepenses] = useState<Depense[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasHydratedData, setHasHydratedData] = useState(false);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({ titre: '', montant: '', description: '' });
 
-  const load = async () => {
-    if (!user || commerceIds.length === 0) { setLoading(false); return; }
+  const load = useCallback(async () => {
+    if (!user) {
+      setDepenses([]);
+      setLoading(false);
+      setHasHydratedData(false);
+      return;
+    }
+    if (commerceIds.length === 0) {
+      setDepenses([]);
+      setLoading(false);
+      setHasHydratedData(true);
+      return;
+    }
+    const idsSorted = [...commerceIds].sort().join(',');
+    const cacheKeyPrimary = `depenses:${idsSorted}`;
+    const cacheKeyLegacy = `depenses_page_${user.id}_${idsSorted}`;
+    const stale =
+      cacheGetStale<Depense[]>(cacheKeyPrimary) ?? cacheGetStale<Depense[]>(cacheKeyLegacy);
+    if (stale?.length) {
+      setDepenses(stale);
+      setHasHydratedData(true);
+    }
+
+    let mergedForErrorHint: Depense[] = [];
     try {
       const offlineDeps = await getOfflineDepenses();
       const offlineItems: Depense[] = offlineDeps.map((d) => ({
@@ -73,6 +98,7 @@ export default function DepensesPage() {
           seen.add(s.id);
         }
       }
+      mergedForErrorHint = merged;
 
       const creatorIds = [...new Set(merged.map((d) => d.created_by).filter(Boolean))];
       const nameMap = await getProfileNamesMap(creatorIds);
@@ -83,14 +109,29 @@ export default function DepensesPage() {
 
       enriched.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       setDepenses(enriched);
-    } catch (err: unknown) {
-      toast.error(toUiErrorMessage(err, 'Impossible de charger les depenses'));
+      cacheSet(cacheKeyPrimary, enriched, 86_400);
+      cacheSet(cacheKeyLegacy, enriched, 86_400);
+    } catch {
+      const again =
+        cacheGetStale<Depense[]>(cacheKeyPrimary) ?? cacheGetStale<Depense[]>(cacheKeyLegacy);
+      if (again?.length) {
+        setDepenses(again);
+      } else if (mergedForErrorHint.length > 0) {
+        mergedForErrorHint.sort(
+          (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        setDepenses(mergedForErrorHint);
+      }
     } finally {
       setLoading(false);
+      setHasHydratedData(true);
     }
-  };
+  }, [user, commerceIds, isOnline]);
 
-  useEffect(() => { load(); }, [user, isOnline, commerceLoading, commerceIds.join(',')]);
+  useEffect(() => {
+    if (commerceLoading) return;
+    void load();
+  }, [user, isOnline, commerceLoading, commerceIds.join(','), load]);
 
   const handleAdd = async () => {
     if (!form.titre || !form.montant || !user) {
@@ -129,9 +170,12 @@ export default function DepensesPage() {
     }
   };
 
-  if (loading) return <div className="p-4"><SkeletonList /></div>;
-
   return (
+    <SmartLoader
+      loading={loading || commerceLoading}
+      hasData={hasHydratedData}
+      skeleton={<div className="p-4"><SkeletonList /></div>}
+    >
     <div className="p-4 space-y-4 max-w-2xl mx-auto pb-32">
       <BackButton fallback="/app" />
       <div className="flex items-center justify-between">
@@ -225,5 +269,6 @@ export default function DepensesPage() {
         </div>
       )}
     </div>
+    </SmartLoader>
   );
 }
