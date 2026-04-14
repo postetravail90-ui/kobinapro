@@ -72,4 +72,3 @@ export default function ProtectedRoute({ allowedRoles }: Props) {
 
   return <Outlet />;
 }
-

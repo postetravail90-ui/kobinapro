@@ -36,7 +36,13 @@ export default function BrandedReceiptCard({ data, branding, isFreePlan = false,
       {/* Header */}
       <div className="px-5 pt-5 pb-3 text-center">
         {logoUrl && (
-          <img src={logoUrl} alt={displayName} className="h-12 mx-auto mb-2 object-contain rounded-lg" />
+          <img
+            src={logoUrl}
+            alt={displayName}
+            className="h-12 mx-auto mb-2 object-contain rounded-lg"
+            loading="lazy"
+            decoding="async"
+          />
         )}
         <h3 className="text-lg font-extrabold text-foreground">{displayName}</h3>
         {displayPhone && <p className="text-xs text-muted-foreground">{displayPhone}</p>}
@@ -124,7 +130,7 @@ export default function BrandedReceiptCard({ data, branding, isFreePlan = false,
         <p className="text-sm text-muted-foreground">{footerMessage}</p>
         {isFreePlan && (
           <div className="flex items-center justify-center gap-1.5 mt-2 opacity-50">
-            <img src={kobinaLogo} alt="KOBINA PRO" className="h-4 object-contain" />
+            <img src={kobinaLogo} alt="KOBINA PRO" className="h-4 object-contain" loading="lazy" decoding="async" />
             <span className="text-[10px] text-muted-foreground">Propulsé par KOBINA PRO</span>
           </div>
         )}

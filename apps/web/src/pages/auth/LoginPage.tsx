@@ -12,7 +12,7 @@ import PhoneInput from '@/components/auth/PhoneInput';
 import { normalizePhone } from '@/lib/phone';
 import { fetchUserRole } from '@/lib/auth-role';
 import { isAccountSuspended } from '@/lib/account-suspended';
-import { assertNavigatorOnlineOrThrow, toAuthUiError } from '@/lib/auth-errors';
+import { ensureOnlineOrThrow, toAuthUiError } from '@/lib/auth-errors';
 import { withUiTimeout } from '@/lib/async-timeout';
 import { LOGIN_FLOW_MAX_MS, SIGN_IN_MAX_MS, ROLE_RESOLVE_MAX_MS } from '@/lib/network-timeouts';
 import { writeLocalUserProfile } from '@/lib/auth/localUserProfileCache';
@@ -43,7 +43,7 @@ export default function LoginPage() {
     try {
       await withUiTimeout(
         (async () => {
-          assertNavigatorOnlineOrThrow();
+          await ensureOnlineOrThrow();
           let email = identifier.trim();
 
           if (!usePhone && !EMAIL_RE.test(email)) {
@@ -71,6 +71,8 @@ export default function LoginPage() {
             email = userData.email;
           }
 
+          email = email.trim().toLowerCase();
+
           const { data, error } = await withUiTimeout(
             supabase.auth.signInWithPassword({ email, password }),
             SIGN_IN_MAX_MS,
@@ -78,6 +80,7 @@ export default function LoginPage() {
           );
 
           if (error) {
+            console.error('[Auth] signInWithPassword:', error.message);
             toast.error(toAuthUiError(error, 'Erreur lors de la connexion'));
             return;
           }

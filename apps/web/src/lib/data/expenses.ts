@@ -1,11 +1,16 @@
 import { supabase } from "@/integrations/supabase/client";
 import { Capacitor } from "@capacitor/core";
-import { getDb } from "@/lib/db";
+import { getDb, initLocalDB } from "@/lib/db";
 import { enqueue } from "@/lib/sync/queue";
 import { ensureBusinessLocalId } from "./business";
 import type { CreateExpenseInput, Expense } from "./types";
 
+export async function pullExpensesFromRemote(commerceServerIds: string[]): Promise<void> {
+  await hydrateExpenses(commerceServerIds);
+}
+
 async function hydrateExpenses(commerceServerIds: string[]): Promise<void> {
+  await initLocalDB();
   if (commerceServerIds.length === 0) return;
   const blockByNavigatorOffline =
     Capacitor.isNativePlatform() && typeof navigator !== "undefined" && !navigator.onLine;
@@ -53,7 +58,7 @@ async function hydrateExpenses(commerceServerIds: string[]): Promise<void> {
 
 export async function getExpenses(commerceServerIds: string[]): Promise<Expense[]> {
   if (commerceServerIds.length === 0) return [];
-  await hydrateExpenses(commerceServerIds);
+  await initLocalDB();
 
   const db = getDb();
   const ph = commerceServerIds.map(() => "?").join(",");

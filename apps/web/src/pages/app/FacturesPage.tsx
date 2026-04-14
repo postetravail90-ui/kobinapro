@@ -1,12 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { FileText, CreditCard, Printer, Eye, User as UserIcon, Clock } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { motion } from 'framer-motion';
 import ReceiptSheet from '@/components/receipt/ReceiptSheet';
 import { printReceipt, type ReceiptData } from '@/lib/receipt-utils';
 import { toast } from 'sonner';
@@ -47,9 +47,117 @@ async function mergeFacturesWithOffline(server: Facture[]): Promise<Facture[]> {
   return merged;
 }
 
+const FACTURE_ROW_ESTIMATE = 172;
+const FACTURE_VIRTUAL_THRESHOLD = 22;
+
+const FactureCard = memo(function FactureCard({
+  f,
+  onView,
+  onPrint,
+}: {
+  f: Facture;
+  onView: (f: Facture) => void;
+  onPrint: (f: Facture) => void;
+}) {
+  const createdDate = new Date(f.created_at);
+  return (
+    <div className="bg-card rounded-xl p-4 border border-border">
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${f.statut === 'payee' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
+          {f.statut === 'payee' ? <FileText size={18} /> : <CreditCard size={18} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-medium text-foreground text-sm">{Number(f.total_final).toLocaleString()} FCFA</p>
+          <p className="text-xs text-muted-foreground">{f.mode_paiement} · {createdDate.toLocaleDateString('fr-FR')} · {createdDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+        </div>
+        <span className={`text-[10px] font-semibold px-2 py-1 rounded-full shrink-0 ${f.statut === 'payee' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
+          {f.statut}
+        </span>
+      </div>
+
+      <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1.5">
+        <UserIcon size={10} />
+        Réalisé par : <span className="font-semibold text-foreground">{f.vendeur_nom || '—'}</span>
+        <span className="mx-1">·</span>
+        <Clock size={10} />
+        {createdDate.toLocaleDateString('fr-FR')} · {createdDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+      </p>
+
+      <div className="flex gap-2 mt-3 pt-3 border-t border-border">
+        <button
+          type="button"
+          onClick={() => onView(f)}
+          className="flex-1 h-9 rounded-lg bg-accent text-accent-foreground text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
+        >
+          <Eye size={14} /> Reçu
+        </button>
+        <button
+          type="button"
+          onClick={() => onPrint(f)}
+          className="flex-1 h-9 rounded-lg bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
+        >
+          <Printer size={14} /> Imprimer
+        </button>
+      </div>
+    </div>
+  );
+});
+
+function FacturesScrollList({
+  items,
+  onView,
+  onPrint,
+}: {
+  items: Facture[];
+  onView: (f: Facture) => void;
+  onPrint: (f: Facture) => void;
+}) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => FACTURE_ROW_ESTIMATE,
+    overscan: 6,
+  });
+
+  if (items.length === 0) {
+    return <EmptyState icon={FileText} title="Aucune facture" description="Les factures apparaîtront ici" />;
+  }
+
+  if (items.length <= FACTURE_VIRTUAL_THRESHOLD) {
+    return (
+      <div className="space-y-2">
+        {items.map((f) => (
+          <FactureCard key={f.id} f={f} onView={onView} onPrint={onPrint} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={parentRef} className="max-h-[min(72vh,640px)] overflow-auto">
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((vi) => (
+          <div
+            key={vi.key}
+            data-index={vi.index}
+            ref={virtualizer.measureElement}
+            className="absolute left-0 right-0 top-0 pb-2"
+            style={{
+              transform: `translateY(${vi.start}px)`,
+            }}
+          >
+            <FactureCard f={items[vi.index]} onView={onView} onPrint={onPrint} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function FacturesPage() {
   const { user } = useAuth();
-  const { commerceIds, commerces, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, commerces, loading: commerceLoading } = useCurrentBusiness();
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(true);
   const [skeletonCap, setSkeletonCap] = useState(false);
@@ -273,63 +381,10 @@ export default function FacturesPage() {
     }
   };
 
+  const payees = useMemo(() => factures.filter((f) => f.statut === 'payee'), [factures]);
+  const credits = useMemo(() => factures.filter((f) => f.statut === 'credit'), [factures]);
+
   if (loading && !skeletonCap) return <div className="p-4"><SkeletonList /></div>;
-
-  const payees = factures.filter(f => f.statut === 'payee');
-  const credits = factures.filter(f => f.statut === 'credit');
-
-  const FactureList = ({ items }: { items: Facture[] }) => (
-    items.length === 0 ? <EmptyState icon={FileText} title="Aucune facture" description="Les factures apparaîtront ici" /> : (
-      <div className="space-y-2">
-        {items.map((f, i) => {
-          const createdDate = new Date(f.created_at);
-          return (
-            <motion.div key={f.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }}
-              className="bg-card rounded-xl p-4 border border-border"
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${f.statut === 'payee' ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'}`}>
-                  {f.statut === 'payee' ? <FileText size={18} /> : <CreditCard size={18} />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground text-sm">{Number(f.total_final).toLocaleString()} FCFA</p>
-                  <p className="text-xs text-muted-foreground">{f.mode_paiement} · {createdDate.toLocaleDateString('fr-FR')} · {createdDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
-                </div>
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded-full shrink-0 ${f.statut === 'payee' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}`}>
-                  {f.statut}
-                </span>
-              </div>
-
-              {/* Operator signature */}
-              <p className="text-[10px] text-muted-foreground mt-2 flex items-center gap-1.5">
-                <UserIcon size={10} />
-                Réalisé par : <span className="font-semibold text-foreground">{f.vendeur_nom || '—'}</span>
-                <span className="mx-1">·</span>
-                <Clock size={10} />
-                {createdDate.toLocaleDateString('fr-FR')} · {createdDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-              </p>
-
-              {/* Receipt actions */}
-              <div className="flex gap-2 mt-3 pt-3 border-t border-border">
-                <button
-                  onClick={() => handleViewReceipt(f)}
-                  className="flex-1 h-9 rounded-lg bg-accent text-accent-foreground text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
-                >
-                  <Eye size={14} /> Reçu
-                </button>
-                <button
-                  onClick={() => handlePrint(f)}
-                  className="flex-1 h-9 rounded-lg bg-primary/10 text-primary text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-[0.97] transition-transform"
-                >
-                  <Printer size={14} /> Imprimer
-                </button>
-              </div>
-            </motion.div>
-          );
-        })}
-      </div>
-    )
-  );
 
   return (
     <div className="p-4 space-y-4 max-w-4xl mx-auto pb-32">
@@ -337,9 +392,15 @@ export default function FacturesPage() {
       <h1 className="text-xl font-bold text-foreground">Factures</h1>
       <Tabs defaultValue="all">
         <TabsList><TabsTrigger value="all">Toutes ({factures.length})</TabsTrigger><TabsTrigger value="payees">Payées ({payees.length})</TabsTrigger><TabsTrigger value="credits">Crédit ({credits.length})</TabsTrigger></TabsList>
-        <TabsContent value="all"><FactureList items={factures} /></TabsContent>
-        <TabsContent value="payees"><FactureList items={payees} /></TabsContent>
-        <TabsContent value="credits"><FactureList items={credits} /></TabsContent>
+        <TabsContent value="all">
+          <FacturesScrollList items={factures} onView={handleViewReceipt} onPrint={handlePrint} />
+        </TabsContent>
+        <TabsContent value="payees">
+          <FacturesScrollList items={payees} onView={handleViewReceipt} onPrint={handlePrint} />
+        </TabsContent>
+        <TabsContent value="credits">
+          <FacturesScrollList items={credits} onView={handleViewReceipt} onPrint={handlePrint} />
+        </TabsContent>
       </Tabs>
 
       <ReceiptSheet open={showReceipt} onClose={() => setShowReceipt(false)} data={receiptData} />

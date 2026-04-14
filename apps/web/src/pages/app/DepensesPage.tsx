@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { getOfflineDepenses } from '@/lib/offline-db';
 import { getExpenses, createExpense } from '@/lib/data/expenses';
@@ -15,7 +16,6 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
 import { SmartLoader } from '@/components/ui/SmartLoader';
 import { toast } from 'sonner';
-import { motion } from 'framer-motion';
 import BackButton from '@/components/BackButton';
 import { toUiErrorMessage } from '@/lib/ui-errors';
 import { cacheGetStale, cacheSet } from '@/lib/cache';
@@ -32,9 +32,88 @@ interface Depense {
   sync_status?: string;
 }
 
+const DEPENSE_ROW_ESTIMATE = 108;
+const DEPENSE_VIRTUAL_THRESHOLD = 22;
+
+const DepenseCard = memo(function DepenseCard({ dep }: { dep: Depense }) {
+  const createdDate = new Date(dep.created_at);
+  return (
+    <div className="bg-card border border-border rounded-xl p-3">
+      <div className="flex items-center justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-foreground truncate">{dep.titre}</p>
+            {dep._offline && (
+              <span className="text-[10px] bg-warning/15 text-warning px-1.5 py-0.5 rounded font-bold">
+                OFFLINE
+              </span>
+            )}
+            {dep.sync_status === 'pending' && (
+              <span className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0" title="En attente de sync" />
+            )}
+          </div>
+          {dep.description && (
+            <p className="text-xs text-muted-foreground truncate">{dep.description}</p>
+          )}
+        </div>
+        <p className="text-sm font-bold text-destructive ml-3">
+          -{Number(dep.montant).toLocaleString()} F
+        </p>
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-2 pt-2 border-t border-border flex items-center gap-1.5">
+        <UserIcon size={10} />
+        Réalisé par : <span className="font-semibold text-foreground">{dep.created_by_name || '—'}</span>
+        <span className="mx-1">·</span>
+        <Clock size={10} />
+        {createdDate.toLocaleDateString('fr-FR')} · {createdDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+      </p>
+    </div>
+  );
+});
+
+function DepensesScrollList({ items }: { items: Depense[] }) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => DEPENSE_ROW_ESTIMATE,
+    overscan: 6,
+  });
+
+  if (items.length <= DEPENSE_VIRTUAL_THRESHOLD) {
+    return (
+      <div className="space-y-2">
+        {items.map((dep) => (
+          <DepenseCard key={dep.id} dep={dep} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={parentRef} className="max-h-[min(72vh,560px)] overflow-auto">
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((vi) => (
+          <div
+            key={vi.key}
+            data-index={vi.index}
+            ref={virtualizer.measureElement}
+            className="absolute left-0 right-0 top-0 pb-2"
+            style={{
+              transform: `translateY(${vi.start}px)`,
+            }}
+          >
+            <DepenseCard dep={items[vi.index]} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function DepensesPage() {
   const { user } = useAuth();
-  const { commerceIds, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const isOnline = useOnlineStatus();
   const [depenses, setDepenses] = useState<Depense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -225,48 +304,7 @@ export default function DepensesPage() {
       {depenses.length === 0 ? (
         <EmptyState icon={Wallet} title="Aucune dépense" description="Ajoutez votre première dépense" />
       ) : (
-        <div className="space-y-2">
-          {depenses.map(dep => {
-            const createdDate = new Date(dep.created_at);
-            return (
-              <motion.div
-                key={dep.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-card border border-border rounded-xl p-3"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground truncate">{dep.titre}</p>
-                      {dep._offline && (
-                        <span className="text-[10px] bg-warning/15 text-warning px-1.5 py-0.5 rounded font-bold">
-                          OFFLINE
-                        </span>
-                      )}
-                      {dep.sync_status === 'pending' && (
-                        <span className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0" title="En attente de sync" />
-                      )}
-                    </div>
-                    {dep.description && (
-                      <p className="text-xs text-muted-foreground truncate">{dep.description}</p>
-                    )}
-                  </div>
-                  <p className="text-sm font-bold text-destructive ml-3">
-                    -{Number(dep.montant).toLocaleString()} F
-                  </p>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-2 pt-2 border-t border-border flex items-center gap-1.5">
-                  <UserIcon size={10} />
-                  Réalisé par : <span className="font-semibold text-foreground">{dep.created_by_name || '—'}</span>
-                  <span className="mx-1">·</span>
-                  <Clock size={10} />
-                  {createdDate.toLocaleDateString('fr-FR')} · {createdDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </p>
-              </motion.div>
-            );
-          })}
-        </div>
+        <DepensesScrollList items={depenses} />
       )}
     </div>
     </SmartLoader>

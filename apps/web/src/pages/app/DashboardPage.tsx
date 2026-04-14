@@ -6,10 +6,17 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useProducts } from '@/hooks/useProducts';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { fetchDashboardStats, fetchDailyReport, type DashboardStats, type DailyReport } from '@/services/dashboard';
+import {
+  fetchDashboardStats,
+  fetchDailyReport,
+  fetchTopProduitsLocal,
+  fetchTotalSalesCountLocal,
+  type DashboardStats,
+  type DailyReport,
+} from '@/services/dashboard';
 import { cacheDashboardData, getCachedDashboardData, getOfflineSales } from '@/lib/offline-db';
 import { StatCard } from '@/components/ui/stat-card';
 import { SkeletonGrid } from '@/components/ui/skeleton-card';
@@ -35,7 +42,7 @@ interface DashboardSnapshotCache {
 
 export default function DashboardPage() {
   const { user, role } = useAuth();
-  const { commerceIds, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const { products } = useProducts(commerceIds);
   const isOnline = useOnlineStatus();
   const navigate = useNavigate();
@@ -268,45 +275,15 @@ export default function DashboardPage() {
         const offlineSales = await getOfflineSales();
         const offlineTotal = offlineSales.reduce((s, sale) => s + Number(sale.total ?? 0), 0);
 
-        if (!isOnline) {
-          if (cachedStats) {
-            setStats(prev => ({
-              ...prev,
-              ventesJour: prev.ventesJour + offlineTotal,
-              transactionsJour: prev.transactionsJour + offlineSales.length,
-            }));
-          }
-          setHasHydratedData(true);
-          setLoading(false);
-          return;
-        }
-
-        const [profileRes] = await Promise.all([
-          supabase.from('profiles').select('nom').eq('id', user.id).single(),
-        ]);
-        setProfile(profileRes.data);
-        if (profileRes.data) {
-          await cacheDashboardData('profile', profileRes.data);
-          cacheSet(`dashboard_profile_${user.id}`, profileRes.data, 86_400);
-        }
-
         let subscriptionSnap: { plan_type: string; trial_end_date: string | null; end_date: string | null } | null = null;
-        if (isOwner) {
-          const { data: subData } = await supabase.from('subscriptions').select('plan_type, trial_end_date, end_date').eq('proprietaire_id', user.id).eq('status', 'active').order('created_at', { ascending: false }).limit(1).single();
-          setSubscription(subData);
-          subscriptionSnap = subData ?? null;
-        }
 
         if (commerceIds.length > 0) {
-          const [dashStats, topRes, dailyReport] = await Promise.all([
+          const [dashStats, topData, dailyReport, txCount] = await Promise.all([
             fetchDashboardStats(commerceIds, products),
-            supabase.from('vue_top_produits').select('produit_nom, total_quantite').in('commerce_id', commerceIds).order('total_quantite', { ascending: false }).limit(6),
+            fetchTopProduitsLocal(commerceIds),
             isOwner ? fetchDailyReport(commerceIds) : Promise.resolve(null),
+            fetchTotalSalesCountLocal(commerceIds),
           ]);
-
-          // Get total transaction count separately
-          const { count: txCount } = await supabase.from('factures').select('id', { count: 'exact', head: true });
-          setTotalTransactions(txCount || 0);
 
           dashStats.ventesJour += offlineTotal;
           dashStats.transactionsJour += offlineSales.length;
@@ -315,15 +292,38 @@ export default function DashboardPage() {
           await cacheDashboardData('stats', dashStats);
           cacheSet(`dashboard_stats_${user.id}`, dashStats, 86_400);
 
-          const topData = topRes.data?.map(p => ({ nom: p.produit_nom || '', total: Number(p.total_quantite) || 0 })) || [];
           setTopProduits(topData);
           await cacheDashboardData('topProduits', topData);
           cacheSet(`dashboard_top_${user.id}`, topData, 86_400);
+
+          setTotalTransactions(txCount);
 
           if (dailyReport) {
             setReport(dailyReport);
             await cacheDashboardData('report', dailyReport);
             cacheSet(`dashboard_report_${user.id}`, dailyReport, 86_400);
+          }
+
+          if (isOnline && isOwner) {
+            const { data: subData } = await supabase
+              .from('subscriptions')
+              .select('plan_type, trial_end_date, end_date')
+              .eq('proprietaire_id', user.id)
+              .eq('status', 'active')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+            setSubscription(subData);
+            subscriptionSnap = subData ?? null;
+          }
+
+          const profileRes = isOnline
+            ? await supabase.from('profiles').select('nom').eq('id', user.id).single()
+            : { data: null as { nom: string } | null };
+          if (profileRes.data) {
+            setProfile(profileRes.data);
+            await cacheDashboardData('profile', profileRes.data);
+            cacheSet(`dashboard_profile_${user.id}`, profileRes.data, 86_400);
           }
 
           cacheSet(
@@ -334,10 +334,30 @@ export default function DashboardPage() {
               topProduits: topData,
               report: dailyReport ?? null,
               subscription: subscriptionSnap,
-              totalTransactions: txCount || 0,
+              totalTransactions: txCount,
             },
             86_400
           );
+        } else if (isOnline) {
+          const [profileRes] = await Promise.all([
+            supabase.from('profiles').select('nom').eq('id', user.id).single(),
+          ]);
+          setProfile(profileRes.data);
+          if (profileRes.data) {
+            await cacheDashboardData('profile', profileRes.data);
+            cacheSet(`dashboard_profile_${user.id}`, profileRes.data, 86_400);
+          }
+          if (isOwner) {
+            const { data: subData } = await supabase
+              .from('subscriptions')
+              .select('plan_type, trial_end_date, end_date')
+              .eq('proprietaire_id', user.id)
+              .eq('status', 'active')
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+            setSubscription(subData);
+          }
         }
         setHasHydratedData(true);
       } catch {

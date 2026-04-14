@@ -3,15 +3,12 @@ import { getSupabaseConnectionInfo } from '@/integrations/supabase/client';
 
 type MaybeError = unknown;
 
-/**
- * Sur **natif** uniquement : `navigator.onLine` évite des blocages async (plugin Network).
- * Sur **navigateur**, on ne bloque pas : `navigator.onLine` est souvent faux (accès par IP LAN,
- * Windows, onglet restauré, etc.) et affichait « Connexion réseau impossible » alors que le réseau marche.
- */
+/** Vérification rapide de connectivité avant appel auth Supabase. */
 export function assertNavigatorOnlineOrThrow(): void {
-  if (!Capacitor.isNativePlatform()) return;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-    throw new Error('Connexion réseau impossible. Vérifiez Internet puis réessayez.');
+    throw new Error(
+      'Pas de connexion internet. Connectez-vous une première fois en ligne pour authentifier votre session.'
+    );
   }
 }
 
@@ -43,9 +40,21 @@ export function supabaseFetchFailureHint(): string {
   }
   if (typeof window !== 'undefined') {
     const origin = window.location.origin;
+    const allowedUrls = new Set<string>([`${origin}`, `${origin}/**`]);
+    if (origin === 'https://localhost' || origin.startsWith('https://localhost:')) {
+      // Capacitor Android/iOS utilise souvent cette origine.
+      allowedUrls.add('https://localhost');
+      allowedUrls.add('https://localhost/**');
+    }
+    if (import.meta.env.DEV) {
+      // Aide explicite pour les tests Vite en local.
+      allowedUrls.add('http://localhost:8080');
+      allowedUrls.add('http://localhost:8080/**');
+    }
+    const allowedUrlsText = Array.from(allowedUrls).join(', ');
     return (
       'Impossible de joindre Supabase depuis ce navigateur (réseau, pare-feu ou blocage). ' +
-      `Dans Supabase : Authentication → URL configuration, ajoutez l’URL exacte utilisée ici (ex. ${origin}/**). ` +
+      `Dans Supabase : Authentication → URL configuration, ajoutez ces URLs autorisées : ${allowedUrlsText}. ` +
       'Vérifiez aussi que l’URL du projet dans .env correspond bien à ce projet Supabase.'
     );
   }

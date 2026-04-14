@@ -1,5 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
-import { getDb } from "@/lib/db";
+import { getDb, initLocalDB } from "@/lib/db";
 import { enqueue } from "@/lib/sync/queue";
 import { ensureBusinessLocalId } from "./business";
 import type { CreateCreditInput, Credit } from "./types";
@@ -72,11 +72,17 @@ async function persistCreditsLocal(rows: Credit[], commerceServerIds: string[]):
   }
 }
 
-export async function getCredits(commerceServerIds: string[]): Promise<Credit[]> {
+/** Télécharge les crédits depuis Supabase et les enregistre en SQLite (seed / sync). */
+export async function pullCreditsFromRemote(commerceServerIds: string[]): Promise<void> {
+  await initLocalDB();
   const fromServer = await fetchCreditsFromServer(commerceServerIds);
   if (fromServer.length && commerceServerIds.length) {
     await persistCreditsLocal(fromServer, commerceServerIds);
   }
+}
+
+export async function getCredits(commerceServerIds: string[]): Promise<Credit[]> {
+  await initLocalDB();
 
   const db = getDb();
   const ph = commerceServerIds.map(() => "?").join(",");
@@ -113,10 +119,6 @@ export async function getCredits(commerceServerIds: string[]): Promise<Credit[]>
     } catch {
       /* ignore row */
     }
-  }
-
-  for (const c of fromServer) {
-    if (!byId.has(c.id)) byId.set(c.id, c);
   }
 
   return [...byId.values()].sort(

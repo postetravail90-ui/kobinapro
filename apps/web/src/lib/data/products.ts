@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { Capacitor } from "@capacitor/core";
-import { getDb } from "@/lib/db";
+import { getDb, initLocalDB } from "@/lib/db";
 import { enqueue } from "@/lib/sync/queue";
 import { ensureBusinessLocalId } from "./business";
 import type { CreateProductInput, Product } from "./types";
@@ -28,7 +28,13 @@ function rowToProduct(
   };
 }
 
+/** Télécharge les produits depuis Supabase et les fusionne dans SQLite (appelé au seed / sync, pas sur le chemin lecture). */
+export async function pullProductsFromRemote(commerceServerIds: string[]): Promise<void> {
+  await hydrateProductsFromServer(commerceServerIds);
+}
+
 async function hydrateProductsFromServer(commerceServerIds: string[]): Promise<void> {
+  await initLocalDB();
   const blockByNavigatorOffline =
     Capacitor.isNativePlatform() && typeof navigator !== "undefined" && !navigator.onLine;
   if (blockByNavigatorOffline) return;
@@ -43,6 +49,7 @@ async function hydrateProductsFromServer(commerceServerIds: string[]): Promise<v
 
   if (error || !data?.length) return;
 
+  await initLocalDB();
   const db = getDb();
   const now = Date.now();
   for (const p of data) {
@@ -92,7 +99,7 @@ async function hydrateProductsFromServer(commerceServerIds: string[]): Promise<v
 export async function getProducts(commerceServerIds: string[]): Promise<Product[]> {
   if (commerceServerIds.length === 0) return [];
 
-  await hydrateProductsFromServer(commerceServerIds);
+  await initLocalDB();
 
   const db = getDb();
   const placeholders = commerceServerIds.map(() => "?").join(",");
@@ -117,6 +124,7 @@ export async function getProducts(commerceServerIds: string[]): Promise<Product[
 }
 
 export async function createProduct(data: CreateProductInput): Promise<Product> {
+  await initLocalDB();
   const db = getDb();
   const bl = await ensureBusinessLocalId(data.commerceServerId);
   const localId = crypto.randomUUID();
@@ -186,6 +194,25 @@ export async function createProduct(data: CreateProductInput): Promise<Product> 
   );
 }
 
+/**
+ * Met à jour le stock en SQLite après une vente locale (sans enqueue : la sync `process_sale` applique le stock côté serveur).
+ */
+export async function applyLocalStockAfterSale(productId: string, newStock: number): Promise<void> {
+  await initLocalDB();
+  const db = getDb();
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT local_id FROM products WHERE (server_id = ? OR local_id = ?) AND deleted_at IS NULL LIMIT 1",
+    [productId, productId]
+  );
+  if (!row) return;
+  const now = Date.now();
+  await db.run(`UPDATE products SET stock_qty = ?, updated_at = ? WHERE local_id = ?`, [
+    newStock,
+    now,
+    String(row.local_id),
+  ]);
+}
+
 export async function updateProduct(
   productId: string,
   patch: Partial<{
@@ -201,6 +228,7 @@ export async function updateProduct(
     actif: boolean;
   }>
 ): Promise<void> {
+  await initLocalDB();
   const db = getDb();
   const row = await db.get<Record<string, unknown>>(
     "SELECT * FROM products WHERE (server_id = ? OR local_id = ?) AND deleted_at IS NULL LIMIT 1",

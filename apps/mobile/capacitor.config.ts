@@ -9,11 +9,12 @@ import type { CapacitorConfig } from "@capacitor/cli";
  * Web : sql.js (fallback PWA), voir `apps/web/src/lib/db/web-driver.ts`.
  */
 const config: CapacitorConfig = {
-  appId: "pro.kobina.app",
-  appName: "KOBINA PRO",
+  appId: "com.kobina.pro",
+  appName: "Kobina Pro",
   webDir: "../web/dist",
   server: {
-    androidScheme: "https"
+    androidScheme: "https",
+    cleartext: false,
   },
   android: {
     allowMixedContent: false,

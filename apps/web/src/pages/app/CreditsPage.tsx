@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { getCredits } from '@/lib/data/credits';
 import { getProfileDisplayName } from '@/lib/data/profile';
 import { payCredit, queueOfflineCreditPayment } from '@/services/sales';
@@ -34,7 +34,7 @@ interface Credit {
 
 export default function CreditsPage() {
   const { user } = useAuth();
-  const { commerceIds, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const isOnline = useOnlineStatus();
   const [credits, setCredits] = useState<Credit[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,15 +130,15 @@ export default function CreditsPage() {
     }
   };
 
-  const activeCredits = credits.filter(c => c.statut !== 'paye');
-  const paidCredits = credits.filter(c => c.statut === 'paye');
+  const activeCredits = useMemo(() => credits.filter((c) => c.statut !== 'paye'), [credits]);
+  const paidCredits = useMemo(() => credits.filter((c) => c.statut === 'paye'), [credits]);
 
   const CreditList = ({ items }: { items: Credit[] }) => (
     items.length === 0 ? (
       <EmptyState icon={CreditCard} title="Aucun crédit" description="Les crédits clients apparaîtront ici" />
     ) : (
       <div className="space-y-3">
-        {items.map((c, i) => {
+        {items.map((c) => {
           const remaining = Number(c.montant_restant);
           const totalAmt = Number(c.total_amount);
           const paid = Number(c.total_paid);
@@ -146,7 +146,7 @@ export default function CreditsPage() {
           const createdDate = new Date(c.created_at);
 
           return (
-            <motion.div key={c.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
+            <motion.div key={c.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
               className={`bg-card rounded-xl p-4 border ${isOverdue ? 'border-destructive/30' : 'border-border'}`}
             >
               {/* Header */}

@@ -8,6 +8,8 @@ import {
   ensureDefaultCommerce,
   ensureOwnerGerantsForProprietaireCommerces,
 } from "@/lib/auth/ensureDefaultCommerce";
+import { initialSync } from "@/lib/sync/initialSync";
+import { deltaSync } from "@/lib/sync/deltaSync";
 
 export interface CommerceIdsPayload {
   ids: string[];
@@ -36,7 +38,14 @@ export function useCommerceIds() {
   const [commerces, setCommerces] = useState<{ id: string; nom: string }[]>([]);
   const [gerantId, setGerantId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refetchNonce, setRefetchNonce] = useState(0);
   const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    const onRefetch = () => setRefetchNonce((n) => n + 1);
+    window.addEventListener("kobina:refetch-commerce-ids", onRefetch);
+    return () => window.removeEventListener("kobina:refetch-commerce-ids", onRefetch);
+  }, []);
 
   useEffect(() => {
     if (!user) {
@@ -69,6 +78,20 @@ export function useCommerceIds() {
           applyPayload(setCommerceIds, setCommerces, setGerantId, idbCached);
           setLoading(false);
           hydratedRef.current = true;
+        }
+
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          const fallback =
+            cacheGet<CommerceIdsPayload>(key) ??
+            cacheGetStale<CommerceIdsPayload>(key) ??
+            idbCached ??
+            (await getCache<CommerceIdsPayload>("commerce_ids").catch(() => null));
+          if (!cancelled && fallback?.ids?.length) {
+            applyPayload(setCommerceIds, setCommerces, setGerantId, fallback);
+            hydratedRef.current = true;
+          }
+          if (!cancelled) setLoading(false);
+          return;
         }
 
         /** Sur le navigateur, `navigator.onLine` est souvent faux (IP LAN, Windows) — on tente quand même le bootstrap Supabase. Sur natif, on respecte l’indicateur pour éviter des inserts inutiles hors-ligne. */
@@ -107,6 +130,9 @@ export function useCommerceIds() {
           applyPayload(setCommerceIds, setCommerces, setGerantId, payload);
           cacheSet(key, payload, 86_400);
           await setCache("commerce_ids", payload);
+          if (!cancelled && user.id && ids.length > 0) {
+            void initialSync(user.id, ids);
+          }
           return;
         }
 
@@ -167,6 +193,9 @@ export function useCommerceIds() {
           applyPayload(setCommerceIds, setCommerces, setGerantId, payload);
           cacheSet(key, payload, 86_400);
           await setCache("commerce_ids", payload);
+          if (user.id && uniqueIds.length > 0) {
+            void initialSync(user.id, uniqueIds);
+          }
         }
       } catch (err) {
         if (import.meta.env.DEV) console.warn("[useCommerceIds]", err);
@@ -187,7 +216,16 @@ export function useCommerceIds() {
     return () => {
       cancelled = true;
     };
-  }, [user, role]);
+  }, [user, role, refetchNonce]);
+
+  useEffect(() => {
+    if (!user?.id || commerceIds.length === 0) return;
+    const t = setInterval(() => {
+      void deltaSync(commerceIds);
+    }, 120_000);
+    void deltaSync(commerceIds);
+    return () => clearInterval(t);
+  }, [user?.id, commerceIds]);
 
   return { commerceIds, commerces, gerantId, loading };
 }

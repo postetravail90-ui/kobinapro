@@ -12,7 +12,7 @@ import PhoneInput from '@/components/auth/PhoneInput';
 import { normalizePhone } from '@/lib/phone';
 import { fetchUserRole } from '@/lib/auth-role';
 import { useAuth } from '@/contexts/AuthContext';
-import { assertNavigatorOnlineOrThrow, toAuthUiError } from '@/lib/auth-errors';
+import { ensureOnlineOrThrow, toAuthUiError } from '@/lib/auth-errors';
 import { withUiTimeout } from '@/lib/async-timeout';
 import { REGISTER_FLOW_MAX_MS } from '@/lib/network-timeouts';
 
@@ -80,7 +80,7 @@ export default function RegisterPage() {
     try {
       await withUiTimeout(
         (async () => {
-          assertNavigatorOnlineOrThrow();
+          await ensureOnlineOrThrow();
           const phone = normalizePhone(form.numero);
           const origin = typeof window !== 'undefined' ? window.location.origin : '';
 

@@ -1,6 +1,8 @@
 import { supabase } from '@/integrations/supabase/client';
 import { addOfflineSale, addLocalCredit, getLocalCredits, updateCachedProductStock } from '@/lib/offline-db';
 import { requestBackgroundSync } from '@/lib/register-sw';
+import { triggerSyncFlush } from '@/lib/sync/engine';
+import { applyLocalStockAfterSale } from '@/lib/data/products';
 
 export type PaymentMode = 'cash' | 'mobile_money' | 'credit';
 
@@ -22,16 +24,18 @@ interface SaleParams {
   userName?: string;
   gerantId: string;
   commerceId: string;
+  /** Conservé pour compatibilité appelants — toutes les ventes passent par la file locale + sync. */
   isOnline: boolean;
   partialAmount?: number;
   clientName?: string;
-  promiseDate?: string; // ISO date string
+  promiseDate?: string;
 }
 
 /**
- * Process a sale — online or offline.
+ * Enregistre une vente en local (IndexedDB / SQLite natif) puis synchronise en arrière-plan via `process_sale`.
+ * Aucun appel réseau sur le chemin critique : retour immédiat avec l’id local de vente.
  */
-export async function processSale(params: SaleParams): Promise<string | null> {
+export async function processSale(params: SaleParams): Promise<string> {
   const {
     cart,
     mode,
@@ -39,77 +43,46 @@ export async function processSale(params: SaleParams): Promise<string | null> {
     userName,
     gerantId,
     commerceId,
-    isOnline,
     partialAmount,
     clientName,
     promiseDate,
   } = params;
 
   const total = cart.reduce((sum, c) => sum + c.produit.prix * c.quantity, 0);
+  const saleId = crypto.randomUUID();
 
-  // ====== OFFLINE FLOW ======
-  if (!isOnline) {
-    const saleId = crypto.randomUUID();
-
-    await addOfflineSale({
-      id: saleId,
-      commerce_id: commerceId,
-      gerant_id: gerantId,
-      user_id: userId,
-      user_name: userName || 'unknown',
-      mode,
-      total,
-      partial_amount: partialAmount || null,
-      client_name: clientName || null,
-      promise_date: promiseDate || null,
-      items: cart.map((c) => ({
-        produit_id: c.produit.id,
-        produit_nom: c.produit.nom,
-        quantite: c.quantity,
-        prix_unitaire: c.produit.prix,
-      })),
-      created_at: new Date().toISOString(),
-      sync_status: 'pending',
-      sync_attempts: 0,
-    });
-
-    for (const item of cart) {
-      await updateCachedProductStock(
-        item.produit.id,
-        Math.max(0, item.produit.stock - item.quantity)
-      );
-    }
-
-    await requestBackgroundSync();
-    return null;
-  }
-
-  // ====== ONLINE FLOW (RPC transactionnelle) ======
-  type SaleItem = { produit_id: string; quantite: number; prix_unitaire: number };
-
-  const items: SaleItem[] = cart.map((c) => ({
-    produit_id: c.produit.id,
-    quantite: c.quantity,
-    prix_unitaire: c.produit.prix,
-  }));
-
-  const clientMutationId = crypto.randomUUID();
-
-  const { data: factureId, error } = await supabase.rpc('process_sale', {
-    p_commerce_id: commerceId,
-    p_gerant_id: gerantId,
-    p_mode: mode,
-    p_items: items,
-    p_partial_amount: partialAmount ?? null,
-    p_client_name: clientName ?? null,
-    p_promise_date: promiseDate ? new Date(promiseDate).toISOString() : null,
-    p_user_name: userName ?? null,
-    p_client_mutation_id: clientMutationId,
+  await addOfflineSale({
+    id: saleId,
+    commerce_id: commerceId,
+    gerant_id: gerantId,
+    user_id: userId,
+    user_name: userName || 'unknown',
+    mode,
+    total,
+    partial_amount: partialAmount ?? null,
+    client_name: clientName ?? null,
+    promise_date: promiseDate ?? null,
+    items: cart.map((c) => ({
+      produit_id: c.produit.id,
+      produit_nom: c.produit.nom,
+      quantite: c.quantity,
+      prix_unitaire: c.produit.prix,
+    })),
+    created_at: new Date().toISOString(),
+    sync_status: 'pending',
+    sync_attempts: 0,
   });
 
-  if (error) throw error;
+  for (const item of cart) {
+    const newStock = Math.max(0, item.produit.stock - item.quantity);
+    await updateCachedProductStock(item.produit.id, newStock);
+    await applyLocalStockAfterSale(item.produit.id, newStock);
+  }
 
-  return factureId as string;
+  void requestBackgroundSync();
+  triggerSyncFlush();
+
+  return saleId;
 }
 
 /**

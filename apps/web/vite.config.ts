@@ -5,9 +5,16 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, path.resolve(__dirname, "."), "");
+  const envDir = path.resolve(__dirname, ".");
+  const env = loadEnv(mode, envDir, "");
+  const supabaseUrlResolved = (env.VITE_SUPABASE_URL ?? "").trim();
+  const supabaseAnonResolved = (
+    env.VITE_SUPABASE_ANON_KEY ||
+    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
+    ""
+  ).trim();
   const supabaseOrigin = (() => {
-    const u = (env.VITE_SUPABASE_URL ?? "").trim();
+    const u = supabaseUrlResolved;
     if (!u) return "";
     try {
       return new URL(u).origin;
@@ -46,10 +53,16 @@ export default defineConfig(({ mode }) => {
       "@": path.resolve(__dirname, "./src")
     }
   },
+  define: {
+    "import.meta.env.VITE_SUPABASE_URL": JSON.stringify(supabaseUrlResolved),
+    "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify(supabaseAnonResolved),
+  },
   build: {
     target: "es2020",
+    minify: "esbuild",
+    cssMinify: true,
     cssCodeSplit: true,
-    chunkSizeWarningLimit: 600,
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       output: {
         manualChunks: {
@@ -64,6 +77,8 @@ export default defineConfig(({ mode }) => {
           ],
           "vendor-supabase": ["@supabase/supabase-js"],
           "vendor-charts": ["recharts"],
+          "vendor-dexie": ["dexie"],
+          "vendor-virtual": ["@tanstack/react-virtual"],
           "vendor-radix": [
             "@radix-ui/react-dialog",
             "@radix-ui/react-tabs",
@@ -77,7 +92,14 @@ export default defineConfig(({ mode }) => {
     }
   },
   optimizeDeps: {
-    include: ["react", "react-dom", "@supabase/supabase-js", "@tanstack/react-query"]
+    include: [
+      "react",
+      "react-dom",
+      "@supabase/supabase-js",
+      "@tanstack/react-query",
+      "dexie",
+      "@tanstack/react-virtual"
+    ]
   }
   };
 });

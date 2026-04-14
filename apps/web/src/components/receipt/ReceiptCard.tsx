@@ -107,7 +107,7 @@ export default function ReceiptCard({ data, className = '' }: Props) {
         <p className="text-sm text-muted-foreground">Merci pour votre confiance 🙏</p>
         {data.isFree && (
           <div className="flex items-center justify-center gap-1.5 mt-2 opacity-50">
-            <img src={kobinaLogo} alt="KOBINA PRO" className="h-4 object-contain" />
+            <img src={kobinaLogo} alt="KOBINA PRO" className="h-4 object-contain" loading="lazy" decoding="async" />
             <span className="text-[10px] text-muted-foreground">Propulsé par KOBINA PRO</span>
           </div>
         )}

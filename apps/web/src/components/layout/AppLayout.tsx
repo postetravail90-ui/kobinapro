@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, lazy, Suspense } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import type { LucideIcon } from 'lucide-react';
 import {
   LayoutDashboard, Package, Users, Receipt, CreditCard,
@@ -14,8 +15,10 @@ import OfflineBanner from '@/components/OfflineBanner';
 import SyncStatusBar from '@/components/SyncStatusBar';
 import InstallBanner from '@/components/pwa/InstallBanner';
 import { useDesktopShortcuts } from '@/hooks/useDesktopShortcuts';
-
-const OnboardingWizard = lazy(() => import('@/components/onboarding/OnboardingWizard'));
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
+import { useScrollToTop } from '@/hooks/useScrollToTop';
+import { prefetchAllAppData, prefetchAppNavTarget } from '@/lib/prefetch/prefetchAppData';
+import OnboardingWizard from '@/components/onboarding/OnboardingWizard';
 
 interface NavItem {
   to: string;
@@ -65,12 +68,23 @@ const managerMobileNav: NavItem[] = [
 ];
 
 // ===== NAV ITEM COMPONENT =====
-function SidebarItem({ item, onNav }: { item: NavItem; onNav: () => void }) {
+function SidebarItem({
+  item,
+  onNav,
+  onPrefetch,
+}: {
+  item: NavItem;
+  onNav: () => void;
+  onPrefetch?: () => void;
+}) {
   return (
     <NavLink
       to={item.to}
       end={item.end}
       onClick={onNav}
+      onMouseEnter={onPrefetch}
+      onFocus={onPrefetch}
+      onTouchStart={onPrefetch}
       className={({ isActive }) =>
         `flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-150 ${
           isActive
@@ -85,11 +99,24 @@ function SidebarItem({ item, onNav }: { item: NavItem; onNav: () => void }) {
   );
 }
 
-function SidebarFlatList({ items, onNav }: { items: NavItem[]; onNav: () => void }) {
+function SidebarFlatList({
+  items,
+  onNav,
+  onPrefetchItem,
+}: {
+  items: NavItem[];
+  onNav: () => void;
+  onPrefetchItem?: (to: string) => void;
+}) {
   return (
     <div className="space-y-0.5">
       {items.map(item => (
-        <SidebarItem key={item.to} item={item} onNav={onNav} />
+        <SidebarItem
+          key={item.to}
+          item={item}
+          onNav={onNav}
+          onPrefetch={onPrefetchItem ? () => onPrefetchItem(item.to) : undefined}
+        />
       ))}
     </div>
   );
@@ -107,7 +134,7 @@ function AppSidebarHeader({
   return (
     <div className="p-4 border-b border-border flex items-center justify-between">
       <div className="flex items-center gap-3">
-        <img src={kobinaLogo} alt="Kobina" className="h-9 w-9 rounded-xl object-cover" />
+        <img src={kobinaLogo} alt="Kobina" className="h-9 w-9 rounded-xl object-cover" loading="eager" decoding="async" />
         <div>
           <span className="font-bold text-base text-foreground tracking-tight">Kobina</span>
           <p className="text-[10px] text-muted-foreground font-medium">{isManager ? 'Gérant' : 'Propriétaire'}</p>
@@ -139,12 +166,25 @@ function AppSignOutButton({ onSignOut }: { onSignOut: () => void }) {
 
 export default function AppLayout() {
   useDesktopShortcuts();
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const queryClient = useQueryClient();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const navigate = useNavigate();
   const { user, role, signOut } = useAuth();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const { permissions, isManager } = useManagerPermissions();
   const { unreadCount } = useNotifications();
   usePushRouting();
+  useScrollToTop(mainScrollRef);
+
+  const prefetchNav = (to: string) => {
+    prefetchAppNavTarget(queryClient, to, user?.id, commerceIds);
+  };
+
+  useEffect(() => {
+    if (!user?.id || commerceLoading || commerceIds.length === 0) return;
+    void prefetchAllAppData(queryClient, user.id, commerceIds).catch(() => {});
+  }, [user?.id, commerceLoading, commerceIds.join(','), queryClient]);
 
   const filteredManagerItems = useMemo(() => {
     return managerSidebarItems.filter(item =>
@@ -183,7 +223,7 @@ export default function AppLayout() {
       <aside className="hidden lg:flex flex-col w-[260px] bg-card border-r border-border shrink-0">
         <AppSidebarHeader isManager={isManager} />
         <nav className="flex-1 p-2.5 overflow-y-auto scrollbar-hide">
-          <SidebarFlatList items={sidebarItems} onNav={() => {}} />
+          <SidebarFlatList items={sidebarItems} onNav={() => {}} onPrefetchItem={prefetchNav} />
         </nav>
         <AppSignOutButton onSignOut={handleSignOut} />
       </aside>
@@ -226,7 +266,7 @@ export default function AppLayout() {
           <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-muted-foreground hover:text-foreground p-1 rounded-lg">
             <Menu size={20} />
           </button>
-          <img src={kobinaLogo} alt="Kobina Pro" className="h-7 rounded-lg object-contain lg:hidden" />
+          <img src={kobinaLogo} alt="Kobina Pro" className="h-7 rounded-lg object-contain lg:hidden" loading="eager" decoding="async" />
           <div className="flex-1" />
           {role === 'super_admin' && (
             <NavLink
@@ -237,7 +277,13 @@ export default function AppLayout() {
               Admin
             </NavLink>
           )}
-          <NavLink to="/app/notifications" className="relative text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted">
+          <NavLink
+            to="/app/notifications"
+            onMouseEnter={() => prefetchNav('/app/notifications')}
+            onFocus={() => prefetchNav('/app/notifications')}
+            onTouchStart={() => prefetchNav('/app/notifications')}
+            className="relative text-muted-foreground hover:text-foreground transition-colors p-2 rounded-lg hover:bg-muted"
+          >
             <Bell size={18} strokeWidth={1.8} />
             {unreadCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 w-4.5 h-4.5 bg-destructive text-destructive-foreground text-[9px] font-bold rounded-full flex items-center justify-center min-w-[18px]">
@@ -245,7 +291,13 @@ export default function AppLayout() {
               </span>
             )}
           </NavLink>
-          <NavLink to="/app/parametres" className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold text-xs">
+          <NavLink
+            to="/app/parametres"
+            onMouseEnter={() => prefetchNav('/app/parametres')}
+            onFocus={() => prefetchNav('/app/parametres')}
+            onTouchStart={() => prefetchNav('/app/parametres')}
+            className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center font-semibold text-xs"
+          >
             {user?.email?.charAt(0).toUpperCase() || 'U'}
           </NavLink>
         </header>
@@ -254,12 +306,8 @@ export default function AppLayout() {
         <OfflineBanner />
 
         {/* Page content */}
-        <main className="flex-1 overflow-y-auto pb-20 lg:pb-6 contain-layout">
-          {role === 'proprietaire' && (
-            <Suspense fallback={null}>
-              <OnboardingWizard />
-            </Suspense>
-          )}
+        <main ref={mainScrollRef} className="flex-1 overflow-y-auto pb-20 lg:pb-6 contain-layout">
+          {role === 'proprietaire' && <OnboardingWizard />}
           <Outlet />
         </main>
       </div>
@@ -271,6 +319,9 @@ export default function AppLayout() {
             key={item.to}
             to={item.to}
             end={item.end}
+            onMouseEnter={() => prefetchNav(item.to)}
+            onFocus={() => prefetchNav(item.to)}
+            onTouchStart={() => prefetchNav(item.to)}
             className={({ isActive }) =>
               `flex flex-col items-center justify-center gap-0.5 min-w-[52px] py-1.5 transition-all duration-150 ${
                 isActive ? 'text-primary' : 'text-muted-foreground'

@@ -1,15 +1,15 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.kobinapro.app',
-  appName: 'kobina-pro',
+  appId: 'com.kobina.pro',
+  appName: 'Kobina Pro',
   webDir: 'dist',
   server: {
-    androidScheme: 'https'
+    androidScheme: 'https',
+    cleartext: false,
   },
   android: {
-    /** Débogage : chrome://inspect — désactiver pour release. */
-    webContentsDebuggingEnabled: true
+    allowMixedContent: false,
   }
 };
 

@@ -5,7 +5,18 @@ import { useSubscription } from '@/hooks/useSubscription';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useNavigate } from 'react-router-dom';
 import { Plus, Users, Loader2, Eye, EyeOff } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
@@ -30,11 +41,13 @@ interface Gerant {
 
 export default function GerantsPage() {
   const { user, role } = useAuth();
+  const navigate = useNavigate();
   const sub = useSubscription();
   const [gerants, setGerants] = useState<Gerant[]>([]);
   const [commerces, setCommerces] = useState<{ id: string; nom: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
+  const [needCommerceDialog, setNeedCommerceDialog] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ nom: '', email: '', numero: '', password: '', commerce_id: '' });
@@ -138,13 +151,17 @@ export default function GerantsPage() {
 
   const handleAdd = async () => {
     if (addLock.current || saving) return;
+    if (isOwner && commerces.length === 0) {
+      setNeedCommerceDialog(true);
+      return;
+    }
     if (!form.nom || !form.email || !form.password || !form.commerce_id) {
       toast.error('Remplissez tous les champs obligatoires');
       return;
     }
     if (!sub.canAddGerant()) {
       toast.error(`Limite de ${sub.limits.max_managers} gérant(s) atteinte.`, {
-        action: { label: 'Mettre à niveau', onClick: () => window.location.href = '/app/abonnements' },
+        action: { label: 'Mettre à niveau', onClick: () => navigate('/app/abonnements') },
       });
       return;
     }
@@ -182,6 +199,15 @@ export default function GerantsPage() {
     if (error) toast.error(error.message); else { toast.success('Gérant supprimé'); load(); }
   };
 
+  const tryOpenAddGerant = () => {
+    if (!sub.canAddGerant()) return;
+    if (isOwner && commerces.length === 0) {
+      setNeedCommerceDialog(true);
+      return;
+    }
+    setOpen(true);
+  };
+
   return (
     <SmartLoader
       loading={loading}
@@ -197,7 +223,9 @@ export default function GerantsPage() {
         </div>
         {isOwner && (
           <Dialog open={open} onOpenChange={setOpen}>
-            <DialogTrigger asChild><Button size="sm" disabled={!sub.canAddGerant()}><Plus size={16} className="mr-1" /> Ajouter</Button></DialogTrigger>
+            <Button size="sm" disabled={!sub.canAddGerant()} onClick={tryOpenAddGerant}>
+              <Plus size={16} className="mr-1" /> Ajouter
+            </Button>
             <DialogContent>
               <DialogHeader><DialogTitle>Créer un gérant</DialogTitle></DialogHeader>
               <div className="space-y-3 pt-2">
@@ -236,14 +264,8 @@ export default function GerantsPage() {
         <UpgradePrompt message={`Limite de ${sub.limits.max_managers} gérant(s) atteinte.`} />
       )}
 
-      {isOwner && commerces.length === 0 && (
-        <div className="bg-warning/10 border border-warning/20 rounded-xl p-4 text-sm text-foreground">
-          ⚠️ Créez d'abord un commerce avant d'ajouter des gérants.
-        </div>
-      )}
-
       {visibleGerants.length === 0 ? (
-        <EmptyState icon={Users} title="Aucun gérant" description="Ajoutez des gérants pour gérer vos commerces" actionLabel={isOwner ? "Ajouter un gérant" : undefined} onAction={isOwner ? () => setOpen(true) : undefined} />
+        <EmptyState icon={Users} title="Aucun gérant" description="Ajoutez des gérants pour gérer vos commerces" actionLabel={isOwner ? "Ajouter un gérant" : undefined} onAction={isOwner ? tryOpenAddGerant : undefined} />
       ) : (
         <div className="space-y-2">
           {visibleGerants.map((g, i) => (
@@ -277,6 +299,28 @@ export default function GerantsPage() {
           onDelete={deleteGerant}
         />
       )}
+
+      <AlertDialog open={needCommerceDialog} onOpenChange={setNeedCommerceDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Créer un commerce d&apos;abord</AlertDialogTitle>
+            <AlertDialogDescription>
+              Pour ajouter un gérant, vous devez d&apos;abord créer un commerce auquel il sera rattaché.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setNeedCommerceDialog(false);
+                navigate('/app/commerces');
+              }}
+            >
+              Créer mon commerce
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
     </SmartLoader>
   );

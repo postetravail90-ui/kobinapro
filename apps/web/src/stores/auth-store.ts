@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { ensureOnlineOrThrow, isFetchFailure } from "@/lib/auth-errors";
 
 interface AuthState {
   user: User | null;
@@ -31,11 +32,21 @@ export const useAuthStore = create<AuthState>((set) => ({
   signInEmail: async (email, password) => {
     set({ loading: true });
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      await ensureOnlineOrThrow();
+      const normalizedEmail = email.trim().toLowerCase();
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
       if (error) throw error;
       if (data.session) {
         set({ session: data.session, user: data.session.user });
       }
+    } catch (error) {
+      if (isFetchFailure(error)) {
+        throw new Error("Impossible de joindre le serveur. Vérifiez votre connexion.");
+      }
+      throw error;
     } finally {
       set({ loading: false });
     }
@@ -44,12 +55,18 @@ export const useAuthStore = create<AuthState>((set) => ({
   signInPhoneOtp: async (phone) => {
     set({ loading: true });
     try {
+      await ensureOnlineOrThrow();
       const { error } = await supabase.auth.signInWithOtp({
         phone,
         options: { shouldCreateUser: false }
       });
       if (error) throw error;
       set({ otpSent: true });
+    } catch (error) {
+      if (isFetchFailure(error)) {
+        throw new Error("Impossible de joindre le serveur. Vérifiez votre connexion.");
+      }
+      throw error;
     } finally {
       set({ loading: false });
     }
@@ -58,6 +75,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   verifyPhoneOtp: async (phone, token) => {
     set({ loading: true });
     try {
+      await ensureOnlineOrThrow();
       const { data, error } = await supabase.auth.verifyOtp({
         phone,
         token,
@@ -68,6 +86,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (data.session) {
         set({ session: data.session, user: data.session.user });
       }
+    } catch (error) {
+      if (isFetchFailure(error)) {
+        throw new Error("Impossible de joindre le serveur. Vérifiez votre connexion.");
+      }
+      throw error;
     } finally {
       set({ loading: false });
     }

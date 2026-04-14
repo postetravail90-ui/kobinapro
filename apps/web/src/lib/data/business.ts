@@ -1,7 +1,8 @@
-import { getDb } from "@/lib/db";
+import { getDb, initLocalDB } from "@/lib/db";
 
 /** Retourne `local_id` pour un commerce Supabase (`commerces.id`), crée la ligne si besoin. */
 export async function ensureBusinessLocalId(serverCommerceId: string, name?: string | null): Promise<string> {
+  await initLocalDB();
   const db = getDb();
   const row = await db.get<{ local_id: string }>(
     "SELECT local_id FROM businesses WHERE server_id = ? AND deleted_at IS NULL",

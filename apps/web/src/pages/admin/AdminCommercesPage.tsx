@@ -1,4 +1,5 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { supabase } from '@/integrations/supabase/client';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -6,7 +7,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Store, Search, Users, Package, ShoppingBag, Loader2, MapPin } from 'lucide-react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
-import { motion } from 'framer-motion';
+import { useDebounce } from '@/hooks/useDebounce';
 
 interface Commerce {
   id: string;
@@ -26,10 +27,98 @@ interface CommerceDetail {
   totalVentes: number;
 }
 
+const COMMERCE_ROW_ESTIMATE = 88;
+const COMMERCE_VIRTUAL_THRESHOLD = 22;
+
+const CommerceRowCard = memo(function CommerceRowCard({
+  c,
+  onOpen,
+}: {
+  c: Commerce;
+  onOpen: (c: Commerce) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="w-full text-left bg-card rounded-xl p-4 border border-border cursor-pointer active:scale-[0.99] transition-transform"
+      onClick={() => onOpen(c)}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+          <Store size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-foreground truncate">{c.nom}</p>
+          <div className="flex gap-2 text-xs text-muted-foreground mt-0.5">
+            <span className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-medium">{c.type}</span>
+            <span
+              className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                c.statut === 'actif' ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'
+              }`}
+            >
+              {c.statut}
+            </span>
+          </div>
+        </div>
+        <p className="text-[10px] text-muted-foreground shrink-0">
+          {new Date(c.created_at).toLocaleDateString('fr-FR')}
+        </p>
+      </div>
+    </button>
+  );
+});
+
+function AdminCommercesScrollList({
+  items,
+  onOpen,
+}: {
+  items: Commerce[];
+  onOpen: (c: Commerce) => void;
+}) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => COMMERCE_ROW_ESTIMATE,
+    overscan: 8,
+  });
+
+  if (items.length <= COMMERCE_VIRTUAL_THRESHOLD) {
+    return (
+      <div className="space-y-2">
+        {items.map((c) => (
+          <CommerceRowCard key={c.id} c={c} onOpen={onOpen} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div ref={parentRef} className="max-h-[min(72vh,720px)] overflow-auto">
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((vi) => (
+          <div
+            key={vi.key}
+            data-index={vi.index}
+            ref={virtualizer.measureElement}
+            className="absolute left-0 right-0 top-0 pb-2"
+            style={{
+              transform: `translateY(${vi.start}px)`,
+            }}
+          >
+            <CommerceRowCard c={items[vi.index]} onOpen={onOpen} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminCommercesPage() {
   const [commerces, setCommerces] = useState<Commerce[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [filterType, setFilterType] = useState('all');
   const [selectedDetail, setSelectedDetail] = useState<CommerceDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -44,13 +133,13 @@ export default function AdminCommercesPage() {
 
   const filtered = useMemo(() => {
     let list = commerces;
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       list = list.filter(c => c.nom.toLowerCase().includes(q) || c.adresse?.toLowerCase().includes(q));
     }
     if (filterType !== 'all') list = list.filter(c => c.type === filterType);
     return list;
-  }, [commerces, search, filterType]);
+  }, [commerces, debouncedSearch, filterType]);
 
   const openDetail = async (c: Commerce) => {
     setDetailOpen(true);
@@ -100,28 +189,7 @@ export default function AdminCommercesPage() {
       {filtered.length === 0 ? (
         <EmptyState icon={Store} title="Aucun commerce" description="Les commerces apparaîtront ici" />
       ) : (
-        <div className="space-y-2">
-          {filtered.map((c, i) => (
-            <motion.div key={c.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.02 }}
-              className="bg-card rounded-xl p-4 border border-border cursor-pointer active:scale-[0.99] transition-transform"
-              onClick={() => openDetail(c)}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
-                  <Store size={18} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{c.nom}</p>
-                  <div className="flex gap-2 text-xs text-muted-foreground mt-0.5">
-                    <span className="px-1.5 py-0.5 bg-muted rounded text-[10px] font-medium">{c.type}</span>
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${c.statut === 'actif' ? 'bg-primary/10 text-primary' : 'bg-destructive/10 text-destructive'}`}>{c.statut}</span>
-                  </div>
-                </div>
-                <p className="text-[10px] text-muted-foreground shrink-0">{new Date(c.created_at).toLocaleDateString('fr-FR')}</p>
-              </div>
-            </motion.div>
-          ))}
-        </div>
+        <AdminCommercesScrollList items={filtered} onOpen={openDetail} />
       )}
 
       <Sheet open={detailOpen} onOpenChange={v => { if (!v) setDetailOpen(false); }}>

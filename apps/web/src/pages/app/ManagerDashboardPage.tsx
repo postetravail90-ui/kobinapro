@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useProducts } from '@/hooks/useProducts';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useManagerPermissions } from '@/hooks/useManagerPermissions';
@@ -35,7 +35,7 @@ interface ManagerDashboardSnapshot {
 
 export default function ManagerDashboardPage() {
   const { user } = useAuth();
-  const { commerceIds, commerces, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, commerces, loading: commerceLoading } = useCurrentBusiness();
   const { products } = useProducts(commerceIds);
   const isOnline = useOnlineStatus();
   const navigate = useNavigate();

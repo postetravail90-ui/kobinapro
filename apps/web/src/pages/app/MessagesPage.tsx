@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useMessages, type ChatContact, type ChatMessage } from '@/hooks/useMessages';
 import { supabase } from '@/integrations/supabase/client';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -31,7 +31,7 @@ let emojiData: unknown = null;
 
 export default function MessagesPage() {
   const { user } = useAuth();
-  const { commerceIds } = useCommerceIds();
+  const { commerceIds } = useCurrentBusiness();
   const {
     contacts, messages, selectedContact, setSelectedContact,
     sendMessage, loading, unreadCounts
@@ -286,6 +286,7 @@ export default function MessagesPage() {
                         alt="Image"
                         className="rounded-lg max-w-full max-h-48 object-cover"
                         loading="lazy"
+                        decoding="async"
                       />
                     </a>
                   )}

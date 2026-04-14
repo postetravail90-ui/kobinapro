@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import {
   cacheLoyaltyCards, getCachedLoyaltyCards,
@@ -38,7 +38,7 @@ interface LoyaltySettings {
 
 export default function FidelitePage() {
   const { role } = useAuth();
-  const { commerceIds, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const isOnline = useOnlineStatus();
   const isOwner = role === 'proprietaire' || role === 'super_admin';
 

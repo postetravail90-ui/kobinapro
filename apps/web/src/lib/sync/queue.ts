@@ -1,4 +1,4 @@
-import { getDb, tryGetDb } from "@/lib/db";
+import { getDb, initLocalDB, tryGetDb } from "@/lib/db";
 import { supabase } from "@/integrations/supabase/client";
 
 let debouncedFlush: ReturnType<typeof setTimeout> | null = null;
@@ -47,6 +47,7 @@ function rowToOp(r: Record<string, unknown>): SyncOperation {
 export async function enqueue(
   op: Omit<SyncOperation, "id" | "created_at" | "retries" | "status" | "error_message">
 ): Promise<void> {
+  await initLocalDB();
   const db = getDb();
   const id = crypto.randomUUID();
   const now = Date.now();

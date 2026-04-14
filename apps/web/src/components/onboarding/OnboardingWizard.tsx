@@ -14,9 +14,7 @@ interface Step {
   checkComplete: () => Promise<boolean>;
 }
 
-function onboardingDismissKey(userId: string) {
-  return `onboarding_dismissed_${userId}`;
-}
+const ONBOARDING_DISMISSED_KEY = 'onboarding_dismissed';
 
 function onboardingAllDoneKey(userId: string) {
   return `onboarding_all_done_${userId}`;
@@ -38,7 +36,7 @@ export default function OnboardingWizard() {
       {
         id: 'commerce',
         title: 'Créer votre commerce',
-        description: 'Ajoutez votre premier commerce pour commencer',
+        description: 'Optionnel — utile pour plusieurs points de vente',
         icon: Store,
         route: '/app/commerces',
         checkComplete: async () => {
@@ -54,7 +52,7 @@ export default function OnboardingWizard() {
         title: 'Ajouter un produit',
         description: 'Ajoutez votre premier produit au catalogue',
         icon: Package,
-        route: '/app/produits',
+        route: '/app/produits/nouveau',
         checkComplete: async () => {
           const { data: commerces } = await supabase
             .from('commerces')
@@ -103,7 +101,10 @@ export default function OnboardingWizard() {
   useEffect(() => {
     if (!user || role !== 'proprietaire' || steps.length === 0) return;
 
-    if (localStorage.getItem(onboardingDismissKey(user.id))) return;
+    if (localStorage.getItem(ONBOARDING_DISMISSED_KEY) === 'true') {
+      setDismissed(true);
+      return;
+    }
     if (localStorage.getItem(onboardingAllDoneKey(user.id))) return;
 
     const checkAll = async () => {
@@ -114,7 +115,9 @@ export default function OnboardingWizard() {
       });
       setCompletedSteps(completed);
 
-      if (completed.size === steps.length) {
+      const coreDone = completed.has('product') && completed.has('sale');
+      const allThree = completed.size === steps.length;
+      if (coreDone || allThree) {
         localStorage.setItem(onboardingAllDoneKey(user.id), '1');
         setVisible(false);
         return;
@@ -131,7 +134,7 @@ export default function OnboardingWizard() {
   const handleDismiss = () => {
     setDismissed(true);
     setVisible(false);
-    if (user) localStorage.setItem(onboardingDismissKey(user.id), '1');
+    localStorage.setItem(ONBOARDING_DISMISSED_KEY, 'true');
   };
 
   const handleGoToStep = (index: number) => {
@@ -185,8 +188,7 @@ export default function OnboardingWizard() {
               <button
                 type="button"
                 key={step.id}
-                onClick={() => !isCompleted && handleGoToStep(i)}
-                disabled={isCompleted}
+                onClick={() => handleGoToStep(i)}
                 className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-all ${
                   isCompleted
                     ? 'bg-primary/5 opacity-60'

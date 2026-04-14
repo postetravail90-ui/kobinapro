@@ -4,16 +4,15 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       throwOnError: false,
-      retry: 2,
-      retryDelay: 1000,
-      staleTime: 1000 * 60 * 5,
-      gcTime: 1000 * 60 * 30,
+      retry: 0,
+      staleTime: Infinity,
+      gcTime: 1000 * 60 * 60,
       refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
+      refetchOnReconnect: false,
       placeholderData: (previousData: unknown) => previousData,
     },
     mutations: {
-      retry: 1,
+      retry: 0,
     },
   },
 });

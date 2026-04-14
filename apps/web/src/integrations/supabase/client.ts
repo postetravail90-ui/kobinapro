@@ -10,17 +10,26 @@ const DEV_PLACEHOLDER_URL = 'https://placeholder.supabase.co';
 const DEV_PLACEHOLDER_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiJ9.dev-placeholder-not-a-real-jwt-signature';
 
-const rawUrl = import.meta.env.VITE_SUPABASE_URL ?? '';
-const rawKey =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim();
+const supabaseAnonKey = (
+  (import.meta.env.VITE_SUPABASE_ANON_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? '') as string
+).trim();
 
-const urlTrim = rawUrl.trim();
-const keyTrim = rawKey.trim();
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error('[Supabase] Variables manquantes :', {
+    url: supabaseUrl ? 'OK' : 'MISSING',
+    key: supabaseAnonKey ? 'OK' : 'MISSING',
+  });
+}
+
+const urlTrim = supabaseUrl;
+const keyTrim = supabaseAnonKey;
 /** Vrai config absente : placeholders pour éviter le crash `createClient` (écran blanc sur Android / web). */
 const usingConfigPlaceholders = !urlTrim || !keyTrim;
 
 const SUPABASE_URL = urlTrim || DEV_PLACEHOLDER_URL;
 const SUPABASE_PUBLISHABLE_KEY = keyTrim || DEV_PLACEHOLDER_ANON_KEY;
+const isNative = Capacitor.isNativePlatform();
 
 if (usingConfigPlaceholders) {
   const msg =
@@ -48,13 +57,16 @@ export function getSupabaseConnectionInfo(): {
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {
-    storage: localStorage,
+    storage: window.localStorage,
     persistSession: true,
     autoRefreshToken: true,
     flowType: 'pkce',
-    detectSessionInUrl: !Capacitor.isNativePlatform(),
+    detectSessionInUrl: !isNative,
   },
   global: {
     fetch: createFetchWithTimeout(SUPABASE_FETCH_TIMEOUT_MS),
+    headers: {
+      'X-Client-Info': isNative ? 'kobina-pro-mobile' : 'kobina-pro-web',
+    },
   },
 });

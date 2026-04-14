@@ -189,6 +189,8 @@ export default function ParametresPage() {
       src={profile.photo_url}
       alt="Photo de profil"
       className="w-20 h-20 rounded-2xl object-cover"
+      loading="eager"
+      decoding="async"
       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
     />
   ) : (
@@ -288,6 +290,8 @@ export default function ParametresPage() {
                       src={branding.logo_url}
                       alt="Logo"
                       className="h-14 w-14 rounded-xl object-cover border border-border"
+                      loading="lazy"
+                      decoding="async"
                       onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   ) : (

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -31,6 +32,7 @@ interface Commerce {
 
 export default function CommercesPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const sub = useSubscription();
   const isOnline = useOnlineStatus();
   const [commerces, setCommerces] = useState<Commerce[]>([]);
@@ -94,7 +96,7 @@ export default function CommercesPage() {
     // Check limit before adding
     if (!sub.canAddCommerce()) {
       toast.error(`Limite atteinte (${sub.limits.max_commerces} commerce${sub.limits.max_commerces > 1 ? 's' : ''}).`, {
-        action: { label: 'Mettre à niveau', onClick: () => window.location.href = '/app/abonnements' },
+        action: { label: 'Mettre à niveau', onClick: () => navigate('/app/abonnements') },
       });
       return;
     }
@@ -151,7 +153,7 @@ export default function CommercesPage() {
 
     if (error) {
       if (error.message.includes('Limite')) {
-        toast.error('Limite atteinte ! Upgradez votre plan.', { action: { label: 'Upgrader', onClick: () => window.location.href = '/app/abonnements' } });
+        toast.error('Limite atteinte ! Upgradez votre plan.', { action: { label: 'Upgrader', onClick: () => navigate('/app/abonnements') } });
       } else {
         toast.error(error.message || 'Erreur lors de la création');
       }

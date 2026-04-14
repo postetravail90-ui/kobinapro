@@ -1,8 +1,10 @@
-import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useEffect, useState, useRef, useCallback, useMemo, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useDebounce } from '@/hooks/useDebounce';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useProducts, type CachedProduct } from '@/hooks/useProducts';
 import { useSyncStore } from '@/store/syncStore';
 import { useSubscription } from '@/hooks/useSubscription';
@@ -39,6 +41,9 @@ import type { ReceiptData } from '@/lib/receipt-utils';
 import { toUiErrorMessage } from '@/lib/ui-errors';
 import { parsePrixInput } from '@/lib/prix-input';
 import { createProduct } from '@/lib/data/products';
+import type { AppRole } from '@/lib/auth-role';
+import { readCachedAppRole, readCachedAppRoleStale } from '@/lib/auth/roleCache';
+import { resolveCommerceServerIdForSession } from '@/lib/auth/ensureDefaultCommerce';
 import type { ProductCacheRow } from '@/lib/local/local-types';
 
 interface CartItem {
@@ -118,15 +123,280 @@ function haptic(pattern: number[] = [10]) {
   if (navigator.vibrate) navigator.vibrate(pattern);
 }
 
+const CART_VIRT_THRESHOLD = 24;
+const DESKTOP_CART_ROW_EST = 132;
+const MOBILE_CART_ROW_EST = 76;
+const RUSH_CART_ROW_EST = 60;
+
+type UpdateQtyFn = (produitId: string, qty: number) => void;
+
+const DesktopCartRow = memo(function DesktopCartRow({
+  item,
+  updateQty,
+}: {
+  item: CartItem;
+  updateQty: UpdateQtyFn;
+}) {
+  return (
+    <div className="bg-muted rounded-xl p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground truncate">{item.produit.nom}</p>
+          <p className="text-xs text-muted-foreground">
+            {Number(item.produit.prix).toLocaleString()} F × {item.quantity}
+          </p>
+        </div>
+
+        <p className="text-sm font-bold text-foreground shrink-0">
+          {(item.produit.prix * item.quantity).toLocaleString()} F
+        </p>
+      </div>
+
+      <div className="flex items-center justify-between mt-2">
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => updateQty(item.produit.id, item.quantity - 1)}
+            className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
+          >
+            <Minus size={14} />
+          </button>
+
+          <span className="w-8 text-center text-sm font-bold text-foreground">{item.quantity}</span>
+
+          <button
+            type="button"
+            onClick={() => updateQty(item.produit.id, item.quantity + 1)}
+            className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => updateQty(item.produit.id, 0)}
+          className="w-7 h-7 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
+        >
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+  );
+});
+
+function DesktopCartSmallList({ cart, updateQty }: { cart: CartItem[]; updateQty: UpdateQtyFn }) {
+  return (
+    <div className="flex-1 overflow-y-auto min-h-0 space-y-2">
+      <AnimatePresence>
+        {cart.map((item) => (
+          <motion.div
+            key={item.produit.id}
+            layout
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+          >
+            <DesktopCartRow item={item} updateQty={updateQty} />
+          </motion.div>
+        ))}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+function DesktopCartVirtualList({ cart, updateQty }: { cart: CartItem[]; updateQty: UpdateQtyFn }) {
+  const parentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: cart.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => DESKTOP_CART_ROW_EST,
+    overscan: 8,
+  });
+
+  return (
+    <div ref={parentRef} className="flex-1 min-h-0 overflow-y-auto">
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((vi) => {
+          const item = cart[vi.index];
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              className="absolute left-0 right-0 top-0 pb-2"
+              style={{
+                transform: `translateY(${vi.start}px)`,
+              }}
+            >
+              <DesktopCartRow item={item} updateQty={updateQty} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DesktopCartContents({ cart, updateQty }: { cart: CartItem[]; updateQty: UpdateQtyFn }) {
+  if (cart.length <= CART_VIRT_THRESHOLD) {
+    return <DesktopCartSmallList cart={cart} updateQty={updateQty} />;
+  }
+  return <DesktopCartVirtualList cart={cart} updateQty={updateQty} />;
+}
+
+const MobileCartRow = memo(function MobileCartRow({
+  item,
+  updateQty,
+}: {
+  item: CartItem;
+  updateQty: UpdateQtyFn;
+}) {
+  return (
+    <div className="flex items-center gap-3 bg-muted rounded-xl p-2.5">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-foreground truncate">{item.produit.nom}</p>
+        <p className="text-xs text-muted-foreground">{Number(item.produit.prix).toLocaleString()} F</p>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => updateQty(item.produit.id, item.quantity - 1)}
+          className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
+        >
+          <Minus size={14} />
+        </button>
+
+        <span className="w-8 text-center text-sm font-bold">{item.quantity}</span>
+
+        <button
+          type="button"
+          onClick={() => updateQty(item.produit.id, item.quantity + 1)}
+          className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => updateQty(item.produit.id, 0)}
+        className="w-8 h-8 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center"
+      >
+        <Trash2 size={14} />
+      </button>
+
+      <p className="text-sm font-bold text-foreground w-16 text-right">
+        {(item.produit.prix * item.quantity).toLocaleString()} F
+      </p>
+    </div>
+  );
+});
+
+function MobileExpandedCartSmall({ cart, updateQty }: { cart: CartItem[]; updateQty: UpdateQtyFn }) {
+  return (
+    <div className="overflow-y-auto max-h-[40vh] p-3 space-y-2">
+      {cart.map((item) => (
+        <motion.div key={item.produit.id} layout>
+          <MobileCartRow item={item} updateQty={updateQty} />
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function MobileExpandedCartVirtual({ cart, updateQty }: { cart: CartItem[]; updateQty: UpdateQtyFn }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: cart.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => MOBILE_CART_ROW_EST,
+    overscan: 8,
+  });
+
+  return (
+    <div ref={scrollRef} className="overflow-y-auto max-h-[40vh] p-3 min-h-0">
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((vi) => {
+          const item = cart[vi.index];
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              className="absolute left-0 right-0 top-0 px-0 pb-2"
+              style={{
+                transform: `translateY(${vi.start}px)`,
+              }}
+            >
+              <MobileCartRow item={item} updateQty={updateQty} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MobileExpandedCartList({ cart, updateQty }: { cart: CartItem[]; updateQty: UpdateQtyFn }) {
+  if (cart.length <= CART_VIRT_THRESHOLD) {
+    return <MobileExpandedCartSmall cart={cart} updateQty={updateQty} />;
+  }
+  return <MobileExpandedCartVirtual cart={cart} updateQty={updateQty} />;
+}
+
+function RushCartVirtualList({ cart }: { cart: CartItem[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: cart.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => RUSH_CART_ROW_EST,
+    overscan: 10,
+  });
+
+  return (
+    <div ref={scrollRef} className="h-full min-h-[120px] max-h-[min(55vh,420px)] w-full overflow-y-auto">
+      <div className="relative w-full" style={{ height: virtualizer.getTotalSize() }}>
+        {virtualizer.getVirtualItems().map((vi) => {
+          const item = cart[vi.index];
+          return (
+            <div
+              key={vi.key}
+              data-index={vi.index}
+              ref={virtualizer.measureElement}
+              className="absolute left-0 right-0 top-0 pb-3"
+              style={{
+                transform: `translateY(${vi.start}px)`,
+              }}
+            >
+              <div className="flex items-center justify-between bg-card rounded-xl p-3 border border-border/50">
+                <span className="text-sm font-semibold truncate pr-2">{item.produit.nom}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-sm font-bold text-primary">×{item.quantity}</span>
+                  <span className="text-sm font-bold">
+                    {(item.produit.prix * item.quantity).toLocaleString()} F
+                  </span>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function SessionsPage() {
   const navigate = useNavigate();
   const { user, role } = useAuth();
-  const { commerceIds, commerces, gerantId, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, commerces, gerantId, loading: commerceLoading } = useCurrentBusiness();
   const { products, loading: productsLoading, refresh: refreshProducts } = useProducts(commerceIds);
   const isOnline = useSyncStore((s) => s.isOnline);
   const sub = useSubscription();
 
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [activeCategory, setActiveCategory] = useState('Tous');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [processing, setProcessing] = useState(false);
@@ -184,8 +454,8 @@ export default function SessionsPage() {
       list = list.filter((p) => (p.categorie || 'Divers') === activeCategory);
     }
 
-    if (search.trim()) {
-      const q = search.toLowerCase().trim();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase().trim();
       list = list.filter(
         (p) =>
           p.nom.toLowerCase().includes(q) ||
@@ -195,7 +465,20 @@ export default function SessionsPage() {
     }
 
     return list;
-  }, [products, activeCategory, search]);
+  }, [products, activeCategory, debouncedSearch]);
+
+  const cartByProductId = useMemo(
+    () => new Map(cart.map((c) => [c.produit.id, c] as const)),
+    [cart]
+  );
+
+  const productScrollRef = useRef<HTMLDivElement>(null);
+  const productVirtualizer = useVirtualizer({
+    count: filteredProducts.length,
+    getScrollElement: () => productScrollRef.current,
+    estimateSize: () => 84,
+    overscan: 10,
+  });
 
   const cartTotal = useMemo(
     () => cart.reduce((sum, c) => sum + c.produit.prix * c.quantity, 0),
@@ -313,11 +596,23 @@ export default function SessionsPage() {
   const stopScanner = () => setScanning(false);
 
   const handleQuickAddProduct = async () => {
-    if (commerceLoading) {
-      toast.info('Chargement de votre espace…');
+    if (!user) {
+      toast.error('Vous devez être connecté.');
       return;
     }
-    if (commerceIds.length === 0) {
+
+    const effectiveRole =
+      (role ?? readCachedAppRole(user.id) ?? readCachedAppRoleStale(user.id)) as AppRole | null;
+
+    let commerceServerId = await resolveCommerceServerIdForSession(
+      user,
+      effectiveRole,
+      commerceIds
+    );
+    if (commerceServerId) {
+      window.dispatchEvent(new Event('kobina:refetch-commerce-ids'));
+    }
+    if (!commerceServerId) {
       toast.error(
         'Aucun commerce n’est chargé pour votre compte. Ouvrez la page Commerces, vérifiez votre connexion, ou attendez la fin du chargement puis réessayez.'
       );
@@ -344,12 +639,12 @@ export default function SessionsPage() {
         stock: Number(newProductForm.stock) || 10,
         code_barre: unknownBarcode,
         categorie: newProductForm.categorie.trim() || null,
-        commerce_id: commerceIds[0],
+        commerce_id: commerceServerId,
       };
 
       if (isOnline) {
         const created = await createProduct({
-          commerceServerId: commerceIds[0],
+          commerceServerId,
           nom: payload.nom,
           prix: payload.prix,
           prix_achat: payload.prix_achat,
@@ -434,7 +729,7 @@ export default function SessionsPage() {
       let gId = gerantId;
       const commerceId = cart[0].produit.commerce_id;
 
-      if (!gId) {
+      if (!gId && isOnline) {
         const { data, error } = await supabase
           .from('gerants')
           .select('id')
@@ -446,7 +741,7 @@ export default function SessionsPage() {
         gId = data?.[0]?.id;
       }
 
-      if (!gId && isOwner) {
+      if (!gId && isOwner && isOnline) {
         const { data: mine, error: eMine } = await supabase
           .from('gerants')
           .select('id')
@@ -459,21 +754,30 @@ export default function SessionsPage() {
       }
 
       if (!gId) {
-        toast.error('Aucun vendeur associé à ce commerce. Réessayez dans un instant ou vérifiez votre connexion.');
+        toast.error(
+          isOnline
+            ? 'Aucun vendeur associé à ce commerce. Réessayez dans un instant ou vérifiez votre connexion.'
+            : 'Aucun vendeur en cache pour ce commerce. Ouvrez l’app une fois en ligne pour synchroniser, ou vérifiez les gérants.'
+        );
         return;
       }
 
       let userName = user.email || 'unknown';
 
       if (isOnline) {
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('nom')
-          .eq('id', user.id)
-          .single();
+        try {
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('nom')
+            .eq('id', user.id)
+            .single();
 
-        if (profileError) throw profileError;
-        userName = profile?.nom || userName;
+          if (!profileError && profile?.nom) {
+            userName = profile.nom;
+          }
+        } catch {
+          /* garde userName depuis l’email */
+        }
       }
 
       const saleTotal = cartTotal;
@@ -516,7 +820,7 @@ export default function SessionsPage() {
       const paidAmount = isFullyPaid ? saleTotal : partialAmount || 0;
 
       const receiptData: ReceiptData = {
-        id: factureId ?? crypto.randomUUID(),
+        id: factureId,
         commerceName: saleCommerceName,
         date: new Date().toISOString(),
         vendeur: userName,
@@ -545,9 +849,7 @@ export default function SessionsPage() {
       setShowSuccess(true);
       setCartExpanded(false);
 
-      if (isOnline) {
-        await refreshProducts();
-      }
+      await refreshProducts();
 
       void getOfflineSales().then((sales) => setOfflineSalesCount(sales.length));
 
@@ -635,53 +937,7 @@ export default function SessionsPage() {
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
               className="bg-card border-t border-border overflow-hidden max-h-[50vh]"
             >
-              <div className="overflow-y-auto max-h-[40vh] p-3 space-y-2">
-                {cart.map((item) => (
-                  <motion.div
-                    key={item.produit.id}
-                    layout
-                    className="flex items-center gap-3 bg-muted rounded-xl p-2.5"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">
-                        {item.produit.nom}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {Number(item.produit.prix).toLocaleString()} F
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => updateQty(item.produit.id, item.quantity - 1)}
-                        className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
-                      >
-                        <Minus size={14} />
-                      </button>
-
-                      <span className="w-8 text-center text-sm font-bold">{item.quantity}</span>
-
-                      <button
-                        onClick={() => updateQty(item.produit.id, item.quantity + 1)}
-                        className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={() => updateQty(item.produit.id, 0)}
-                      className="w-8 h-8 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-
-                    <p className="text-sm font-bold text-foreground w-16 text-right">
-                      {(item.produit.prix * item.quantity).toLocaleString()} F
-                    </p>
-                  </motion.div>
-                ))}
-              </div>
+              <MobileExpandedCartList cart={cart} updateQty={updateQty} />
 
               <div className="px-3 pb-2">
                 <button
@@ -1211,7 +1467,7 @@ export default function SessionsPage() {
 
             <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1">
               {favoriteProducts.map((p) => {
-                const inCart = cart.find((c) => c.produit.id === p.id);
+                const inCart = cartByProductId.get(p.id);
 
                 return (
                   <motion.button
@@ -1251,7 +1507,7 @@ export default function SessionsPage() {
         )}
 
         {!rushMode && (
-          <div className="flex-1 overflow-y-auto p-3 pb-32 lg:pb-3">
+          <div ref={productScrollRef} className="flex-1 overflow-y-auto p-3 pb-32 lg:pb-3">
             {filteredProducts.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
                 <Search size={40} className="mb-3 opacity-30" />
@@ -1259,88 +1515,103 @@ export default function SessionsPage() {
                 <p className="text-xs">Modifiez votre recherche</p>
               </div>
             ) : (
-              <div className="space-y-1.5">
-                {filteredProducts.map((product) => {
-                  const inCart = cart.find((c) => c.produit.id === product.id);
+              <div
+                className="relative w-full"
+                style={{ height: productVirtualizer.getTotalSize() }}
+              >
+                {productVirtualizer.getVirtualItems().map((vi) => {
+                  const product = filteredProducts[vi.index];
+                  const inCart = cartByProductId.get(product.id);
                   const outOfStock = product.stock <= 0;
                   const lowStock = product.stock > 0 && product.stock <= 5;
 
                   return (
-                    <motion.button
-                      key={product.id}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => addToCart(product)}
-                      disabled={outOfStock}
-                      className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-all active:bg-accent ${
-                        inCart
-                          ? 'bg-primary/5 border border-primary/20'
-                          : 'bg-card border border-border/40 hover:border-border'
-                      } ${outOfStock ? 'opacity-40 cursor-not-allowed' : ''}`}
+                    <div
+                      key={vi.key}
+                      data-index={vi.index}
+                      ref={productVirtualizer.measureElement}
+                      className="absolute left-0 right-0 top-0 pb-1.5"
+                      style={{
+                        transform: `translateY(${vi.start}px)`,
+                      }}
                     >
-                      <div
-                        className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg shrink-0 ${
-                          inCart ? 'bg-primary/10' : 'bg-muted'
-                        }`}
+                      <button
+                        type="button"
+                        onClick={() => addToCart(product)}
+                        disabled={outOfStock}
+                        className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-[background-color,border-color,opacity,transform] duration-150 active:bg-accent ${
+                          inCart
+                            ? 'bg-primary/5 border border-primary/20'
+                            : 'bg-card border border-border/40 hover:border-border'
+                        } ${outOfStock ? 'opacity-40 cursor-not-allowed' : ''}`}
                       >
-                        📦
-                      </div>
+                        <div
+                          className={`w-11 h-11 rounded-xl flex items-center justify-center text-lg shrink-0 ${
+                            inCart ? 'bg-primary/10' : 'bg-muted'
+                          }`}
+                        >
+                          📦
+                        </div>
 
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-foreground truncate">
-                          {product.nom}
-                        </p>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">
+                            {product.nom}
+                          </p>
 
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-xs font-bold text-primary">
-                            {Number(product.prix).toLocaleString()} F
-                          </span>
-
-                          {lowStock && (
-                            <span className="flex items-center gap-0.5 text-[10px] font-semibold text-warning">
-                              <AlertTriangle size={10} /> {product.stock}
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-xs font-bold text-primary">
+                              {Number(product.prix).toLocaleString()} F
                             </span>
-                          )}
 
-                          {outOfStock && (
-                            <span className="text-[10px] font-bold text-destructive">
-                              Rupture
+                            {lowStock && (
+                              <span className="flex items-center gap-0.5 text-[10px] font-semibold text-warning">
+                                <AlertTriangle size={10} /> {product.stock}
+                              </span>
+                            )}
+
+                            {outOfStock && (
+                              <span className="text-[10px] font-bold text-destructive">
+                                Rupture
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {inCart ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateQty(product.id, inCart.quantity - 1);
+                              }}
+                              className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
+                            >
+                              <Minus size={14} />
+                            </button>
+
+                            <span className="w-7 text-center text-sm font-bold text-primary">
+                              {inCart.quantity}
                             </span>
-                          )}
-                        </div>
-                      </div>
 
-                      {inCart ? (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateQty(product.id, inCart.quantity - 1);
-                            }}
-                            className="w-8 h-8 rounded-lg bg-card border border-border flex items-center justify-center active:scale-90 transition-transform"
-                          >
-                            <Minus size={14} />
-                          </button>
-
-                          <span className="w-7 text-center text-sm font-bold text-primary">
-                            {inCart.quantity}
-                          </span>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              updateQty(product.id, inCart.quantity + 1);
-                            }}
-                            className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center active:scale-90 transition-transform"
-                          >
-                            <Plus size={14} />
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                          <Plus size={20} />
-                        </div>
-                      )}
-                    </motion.button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateQty(product.id, inCart.quantity + 1);
+                              }}
+                              className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center active:scale-90 transition-transform"
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                            <Plus size={20} />
+                          </div>
+                        )}
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -1349,15 +1620,15 @@ export default function SessionsPage() {
         )}
 
         {rushMode && (
-          <div className="flex-1 flex flex-col items-center justify-center p-4 pb-32 lg:pb-4">
+          <div className="flex-1 flex flex-col min-h-0 p-4 pb-32 lg:pb-4">
             {cart.length === 0 ? (
-              <div className="text-center text-muted-foreground">
+              <div className="flex flex-col items-center justify-center flex-1 text-center text-muted-foreground">
                 <Zap size={48} className="mx-auto mb-3 text-primary opacity-50" />
                 <p className="text-sm font-medium">Mode rapide activé</p>
                 <p className="text-xs">Utilisez les favoris ou le scanner</p>
               </div>
-            ) : (
-              <div className="w-full space-y-3">
+            ) : cart.length <= CART_VIRT_THRESHOLD ? (
+              <div className="w-full space-y-3 max-w-lg mx-auto">
                 {cart.map((item) => (
                   <div
                     key={item.produit.id}
@@ -1372,6 +1643,10 @@ export default function SessionsPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            ) : (
+              <div className="w-full max-w-lg mx-auto flex-1 min-h-0 flex flex-col">
+                <RushCartVirtualList cart={cart} />
               </div>
             )}
           </div>
@@ -1402,69 +1677,16 @@ export default function SessionsPage() {
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          <AnimatePresence>
-            {cart.map((item) => (
-              <motion.div
-                key={item.produit.id}
-                layout
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                className="bg-muted rounded-xl p-3"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate">
-                      {item.produit.nom}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {Number(item.produit.prix).toLocaleString()} F × {item.quantity}
-                    </p>
-                  </div>
-
-                  <p className="text-sm font-bold text-foreground shrink-0">
-                    {(item.produit.prix * item.quantity).toLocaleString()} F
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-between mt-2">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      onClick={() => updateQty(item.produit.id, item.quantity - 1)}
-                      className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
-                    >
-                      <Minus size={14} />
-                    </button>
-
-                    <span className="w-8 text-center text-sm font-bold text-foreground">
-                      {item.quantity}
-                    </span>
-
-                    <button
-                      onClick={() => updateQty(item.produit.id, item.quantity + 1)}
-                      className="w-7 h-7 rounded-lg bg-card border border-border flex items-center justify-center hover:bg-accent transition-colors"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-
-                  <button
-                    onClick={() => updateQty(item.produit.id, 0)}
-                    className="w-7 h-7 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center hover:bg-destructive/20 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-
-          {cart.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+        <div className="flex-1 flex flex-col min-h-0">
+          {cart.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground p-3">
               <Receipt size={40} className="mb-2 opacity-30" />
               <p className="text-sm font-medium">Panier vide</p>
               <p className="text-xs">Cliquez sur un produit</p>
+            </div>
+          ) : (
+            <div className="flex-1 flex flex-col min-h-0 p-3 pt-3">
+              <DesktopCartContents cart={cart} updateQty={updateQty} />
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { fetchProfitReport, getPeriodDates, type ProfitReport, type ProfitPeriod } from '@/services/profit';
 import { SkeletonCard } from '@/components/ui/skeleton-card';
 import { StatCard } from '@/components/ui/stat-card';
@@ -25,7 +25,7 @@ const PERIODS: { label: string; value: ProfitPeriod }[] = [
 
 export default function BeneficePage() {
   const { role } = useAuth();
-  const { commerceIds, loading: commerceLoading } = useCommerceIds();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const [loading, setLoading] = useState(true);
   const [period, setPeriod] = useState<ProfitPeriod>('month');
   const [report, setReport] = useState<ProfitReport | null>(null);

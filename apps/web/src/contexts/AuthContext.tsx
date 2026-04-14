@@ -106,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [softSessionWarning, setSoftSessionWarning] = useState(false);
   const mountedRef = useRef(true);
   const lastSessionFingerprintRef = useRef<string>('');
+  const primaryCommerceEnsuredForUserRef = useRef<string | null>(null);
 
   /** Résout le rôle en ligne ; en cas d’échec réseau, ne modifie pas le rôle déjà affiché (coffre). */
   const resolveRole = useCallback(async (userId: string): Promise<AppRole | null> => {
@@ -195,6 +196,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await persistSession(session, user, r);
     }
   }, [user?.id, session, user, resolveRole]);
+
+  /** Commerce par défaut + gérant technique propriétaire — arrière-plan, ne bloque pas l’UI. */
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid || !session?.user) {
+      primaryCommerceEnsuredForUserRef.current = null;
+      return;
+    }
+    const r = role;
+    if (r !== 'proprietaire' && r !== 'super_admin') return;
+    if (primaryCommerceEnsuredForUserRef.current === uid) return;
+    primaryCommerceEnsuredForUserRef.current = uid;
+    void import('@/lib/auth/ensureDefaultCommerce')
+      .then(({ ensurePrimaryCommerceForOwner }) => ensurePrimaryCommerceForOwner(user))
+      .then((id) => {
+        if (id && typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('kobina:refetch-commerce-ids'));
+        }
+      })
+      .catch(() => {});
+  }, [user, session, role]);
 
   useEffect(() => {
     mountedRef.current = true;

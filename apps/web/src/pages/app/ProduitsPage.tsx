@@ -1,6 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo, memo } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
-import { useCommerceIds } from '@/hooks/useCommerceIds';
+import { useCurrentBusiness } from '@/hooks/useCurrentBusiness';
 import { useProducts, type CachedProduct } from '@/hooks/useProducts';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,28 +13,94 @@ import { Plus, Package, Loader2, Search, ScanBarcode, Camera, Star } from 'lucid
 import { EmptyState } from '@/components/ui/empty-state';
 import { SkeletonList } from '@/components/ui/skeleton-card';
 import { toast } from 'sonner';
-import { motion } from 'framer-motion';
+import { useDebounce } from '@/hooks/useDebounce';
 import ProductDetailSheet from '@/components/products/ProductDetailSheet';
 import BackButton from '@/components/BackButton';
 import { parsePrixInput } from '@/lib/prix-input';
 import { createProduct, updateProduct } from '@/lib/data/products';
+import type { AppRole } from '@/lib/auth-role';
+import { readCachedAppRole, readCachedAppRoleStale } from '@/lib/auth/roleCache';
+import { resolveCommerceServerIdForSession } from '@/lib/auth/ensureDefaultCommerce';
 import type { Html5Qrcode } from 'html5-qrcode';
+
+const PRODUCT_ROW_ESTIMATE_PX = 96;
+
+type ProduitsListRowProps = {
+  p: CachedProduct;
+  onOpenDetail: (p: CachedProduct) => void;
+  onToggleFavori: (e: React.MouseEvent, id: string, favori: boolean) => void;
+};
+
+const ProduitsListRow = memo(function ProduitsListRow({
+  p,
+  onOpenDetail,
+  onToggleFavori,
+}: ProduitsListRowProps) {
+  return (
+    <div
+      className="bg-card rounded-xl p-4 border border-border active:scale-[0.98] transition-transform cursor-pointer"
+      onClick={() => onOpenDetail(p)}
+    >
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center shrink-0">
+          <Package size={18} className="text-accent-foreground" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 min-w-0">
+            <p className="font-medium text-foreground text-sm truncate">{p.nom}</p>
+            {p.sync_status === 'pending' && (
+              <span
+                className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0"
+                title="Sync en attente"
+              />
+            )}
+          </div>
+          <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
+            <span className="text-primary font-bold">{Number(p.prix).toLocaleString()} F</span>
+            <span className={p.stock <= 5 ? 'text-destructive font-medium' : ''}>
+              Stock: {p.stock} {p.unite || 'pièce(s)'}
+            </span>
+          </div>
+          <div className="flex gap-3 text-[10px] text-muted-foreground mt-0.5">
+            {p.categorie && <span>{p.categorie}</span>}
+            {p.code_barre && <span>Code: {p.code_barre}</span>}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => onToggleFavori(e, p.id, p.favori)}
+          className={`p-2 ${p.favori ? 'text-warning' : 'text-muted-foreground hover:text-warning'}`}
+        >
+          <Star size={16} fill={p.favori ? 'currentColor' : 'none'} />
+        </button>
+      </div>
+    </div>
+  );
+});
 
 export default function ProduitsPage() {
   const { user, role } = useAuth();
-  const { commerceIds, loading: commerceLoading } = useCommerceIds();
+  const location = useLocation();
+  const { commerceIds, loading: commerceLoading } = useCurrentBusiness();
   const isOwner = role === 'proprietaire' || role === 'super_admin';
   const { products, loading: productsLoading, refresh } = useProducts(commerceIds, { hideCosting: !isOwner });
 
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [form, setForm] = useState({ nom: '', prix: '', prix_achat: '', stock: '', categorie: '', code_barre: '', unite: 'piece' });
   const [editId, setEditId] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<CachedProduct | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+
+  useEffect(() => {
+    if (location.pathname.endsWith('/nouveau')) {
+      setOpen(true);
+    }
+  }, [location.pathname]);
 
   // USB barcode scanner
   const barcodeBuffer = useRef('');
@@ -112,11 +180,23 @@ export default function ProduitsPage() {
   };
 
   const handleSave = async () => {
-    if (commerceLoading) {
-      toast.info('Chargement de votre espace…');
+    if (!user) {
+      toast.error('Vous devez être connecté pour enregistrer un produit.');
       return;
     }
-    if (commerceIds.length === 0) {
+
+    const effectiveRole =
+      (role ?? readCachedAppRole(user.id) ?? readCachedAppRoleStale(user.id)) as AppRole | null;
+
+    let commerceServerId = await resolveCommerceServerIdForSession(
+      user,
+      effectiveRole,
+      commerceIds
+    );
+    if (commerceServerId) {
+      window.dispatchEvent(new Event('kobina:refetch-commerce-ids'));
+    }
+    if (!commerceServerId) {
       toast.error(
         'Aucun commerce n’est chargé pour votre compte. Ouvrez la page Commerces, vérifiez votre connexion, ou attendez la fin du chargement puis réessayez.'
       );
@@ -159,7 +239,7 @@ export default function ProduitsPage() {
     } else {
       try {
         await createProduct({
-          commerceServerId: commerceIds[0],
+          commerceServerId,
           nom: payload.nom,
           prix: payload.prix,
           prix_achat: payload.prix_achat,
@@ -181,17 +261,6 @@ export default function ProduitsPage() {
     refresh();
   };
 
-  const toggleFavori = async (e: React.MouseEvent, id: string, current: boolean) => {
-    e.stopPropagation();
-    try {
-      await updateProduct(id, { favori: !current });
-      toast.success(current ? 'Retiré des favoris' : 'Ajouté aux favoris ⭐');
-      refresh();
-    } catch {
-      toast.error('Impossible de mettre à jour le favori');
-    }
-  };
-
   const handleDelete = async (id: string) => {
     if (!isOwner) { toast.error('Seul le propriétaire peut supprimer'); return; }
     if (!confirm('Supprimer ce produit ?')) return;
@@ -210,17 +279,42 @@ export default function ProduitsPage() {
     setOpen(true);
   };
 
-  const openDetail = (p: CachedProduct) => {
+  const openDetail = useCallback((p: CachedProduct) => {
     setSelectedProduct(p);
     setDetailOpen(true);
-  };
+  }, []);
 
-  const filtered = products.filter(p => {
-    const q = search.toLowerCase().trim();
-    if (!q) return true;
-    return p.nom.toLowerCase().includes(q) ||
-      p.code_barre?.toLowerCase().includes(q) ||
-      p.categorie?.toLowerCase().includes(q);
+  const toggleFavoriStable = useCallback(
+    async (e: React.MouseEvent, id: string, current: boolean) => {
+      e.stopPropagation();
+      try {
+        await updateProduct(id, { favori: !current });
+        toast.success(current ? 'Retiré des favoris' : 'Ajouté aux favoris ⭐');
+        refresh();
+      } catch {
+        toast.error('Impossible de mettre à jour le favori');
+      }
+    },
+    [refresh]
+  );
+
+  const filtered = useMemo(() => {
+    const q = debouncedSearch.toLowerCase().trim();
+    if (!q) return products;
+    return products.filter(
+      (p) =>
+        p.nom.toLowerCase().includes(q) ||
+        p.code_barre?.toLowerCase().includes(q) ||
+        p.categorie?.toLowerCase().includes(q)
+    );
+  }, [products, debouncedSearch]);
+
+  const listParentRef = useRef<HTMLDivElement>(null);
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => listParentRef.current,
+    estimateSize: () => PRODUCT_ROW_ESTIMATE_PX,
+    overscan: 8,
   });
 
   if (productsLoading || commerceLoading) return <div className="p-4"><SkeletonList /></div>;
@@ -313,41 +407,32 @@ export default function ProduitsPage() {
       {filtered.length === 0 ? (
         <EmptyState icon={Package} title="Aucun produit" description="Ajoutez vos produits pour commencer" actionLabel="Ajouter" onAction={() => setOpen(true)} />
       ) : (
-        <div className="space-y-2">
-          {filtered.map((p, i) => (
-            <motion.div key={p.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.03 }}
-              className="bg-card rounded-xl p-4 border border-border active:scale-[0.98] transition-transform cursor-pointer"
-              onClick={() => openDetail(p)}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-accent flex items-center justify-center shrink-0">
-                  <Package size={18} className="text-accent-foreground" />
+        <div ref={listParentRef} className="max-h-[min(560px,72vh)] overflow-auto pr-1">
+          <div
+            className="relative w-full"
+            style={{ height: virtualizer.getTotalSize() }}
+          >
+            {virtualizer.getVirtualItems().map((vi) => {
+              const p = filtered[vi.index];
+              return (
+                <div
+                  key={vi.key}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  className="absolute left-0 right-0 top-0 px-0 pb-2"
+                  style={{
+                    transform: `translateY(${vi.start}px)`,
+                  }}
+                >
+                  <ProduitsListRow
+                    p={p}
+                    onOpenDetail={openDetail}
+                    onToggleFavori={toggleFavoriStable}
+                  />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <p className="font-medium text-foreground text-sm truncate">{p.nom}</p>
-                    {p.sync_status === "pending" && (
-                      <span
-                        className="h-2 w-2 rounded-full bg-muted-foreground/50 shrink-0"
-                        title="Sync en attente"
-                      />
-                    )}
-                  </div>
-                  <div className="flex gap-3 text-xs text-muted-foreground mt-0.5">
-                    <span className="text-primary font-bold">{Number(p.prix).toLocaleString()} F</span>
-                    <span className={p.stock <= 5 ? 'text-destructive font-medium' : ''}>Stock: {p.stock} {p.unite || 'pièce(s)'}</span>
-                  </div>
-                  <div className="flex gap-3 text-[10px] text-muted-foreground mt-0.5">
-                    {p.categorie && <span>{p.categorie}</span>}
-                    {p.code_barre && <span>Code: {p.code_barre}</span>}
-                  </div>
-                </div>
-                <button onClick={(e) => toggleFavori(e, p.id, p.favori)} className={`p-2 ${p.favori ? 'text-warning' : 'text-muted-foreground hover:text-warning'}`}>
-                  <Star size={16} fill={p.favori ? 'currentColor' : 'none'} />
-                </button>
-              </div>
-            </motion.div>
-          ))}
+              );
+            })}
+          </div>
         </div>
       )}
 

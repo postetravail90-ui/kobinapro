@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
@@ -24,10 +24,6 @@ export default class ErrorBoundary extends Component<Props, State> {
     console.error('[ErrorBoundary]', error, info.componentStack);
   }
 
-  handleReload = () => {
-    window.location.reload();
-  };
-
   handleReset = () => {
     this.setState({ hasError: false, error: null });
   };
@@ -48,17 +44,11 @@ export default class ErrorBoundary extends Component<Props, State> {
             </div>
             <div className="flex gap-3 justify-center">
               <button
+                type="button"
                 onClick={this.handleReset}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium border border-border bg-card text-foreground hover:bg-muted transition-colors"
+                className="px-4 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
               >
                 Réessayer
-              </button>
-              <button
-                onClick={this.handleReload}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center gap-2"
-              >
-                <RefreshCw size={16} />
-                Recharger
               </button>
             </div>
             {process.env.NODE_ENV === 'development' && this.state.error && (

@@ -1,15 +1,22 @@
 import { createRoot } from "react-dom/client";
+import { Capacitor } from "@capacitor/core";
 import ErrorBoundary from "./components/ErrorBoundary";
 import App from "./App";
 import "./index.css";
 import { registerServiceWorker } from "./lib/register-sw";
 import { initLocalDataLayer } from "./lib/local/offline-store";
 import { initLocalDB } from "@/lib/db";
+import { initDexieProDB } from "@/lib/db/dexie-indexed-db";
 import { startOfflineFirstSyncEngine, triggerSyncFlush } from "@/lib/sync/engine";
 import { startNetworkWatcher } from "@/lib/sync/network";
 import { useSyncStore } from "@/store/syncStore";
 
 registerServiceWorker();
+
+if (import.meta.env.DEV) {
+  console.log("Supabase URL:", import.meta.env.VITE_SUPABASE_URL);
+  console.log("Is native:", Capacitor.isNativePlatform());
+}
 
 const rootEl = document.getElementById("root");
 if (!rootEl) {
@@ -27,6 +34,9 @@ void (async () => {
   try {
     await initLocalDB().catch((e) => {
       console.error("[Kobina] initLocalDB :", e);
+    });
+    await initDexieProDB().catch((e) => {
+      console.error("[Kobina] initDexieProDB :", e);
     });
     await initLocalDataLayer().catch((e) => {
       console.error("[Kobina] initLocalDataLayer a échoué — poursuite :", e);

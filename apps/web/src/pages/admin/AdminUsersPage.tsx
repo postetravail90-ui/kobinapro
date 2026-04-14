@@ -22,6 +22,7 @@ import { SkeletonList } from '@/components/ui/skeleton-card';
 import { toast } from 'sonner';
 import { motion } from 'framer-motion';
 import { useAuth } from '@/contexts/AuthContext';
+import { useDebounce } from '@/hooks/useDebounce';
 
 interface UserRow {
   id: string;
@@ -82,6 +83,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebounce(search, 300);
   const [filterRole, setFilterRole] = useState('all');
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
@@ -113,8 +115,8 @@ export default function AdminUsersPage() {
 
   const filtered = useMemo(() => {
     let list = users;
-    if (search.trim()) {
-      const q = search.toLowerCase();
+    if (debouncedSearch.trim()) {
+      const q = debouncedSearch.toLowerCase();
       list = list.filter(
         (u) =>
           u.email?.toLowerCase().includes(q) ||
@@ -126,7 +128,7 @@ export default function AdminUsersPage() {
       list = list.filter((u) => (u.role || 'proprietaire') === filterRole);
     }
     return list;
-  }, [users, search, filterRole]);
+  }, [users, debouncedSearch, filterRole]);
 
   const openUserDetail = async (row: UserRow) => {
     setDetailLoading(true);
